@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { generateJSON } from "@/lib/gemini";
+import { formatStructureStep } from "@/lib/reelRadarTypes";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -35,7 +36,9 @@ ${toneNote}
 账号：${reel.owner_username}
 钩子类型：${analysis?.hook_type ?? ""}
 开场钩子：${analysis?.hook_text ?? ""}
-结构：${(analysis?.structure ?? []).join(" → ")}
+结构：${((analysis?.structure ?? []) as (string | { title: string; description: string })[])
+    .map((s) => formatStructureStep(s).title)
+    .join(" → ")}
 CTA：${analysis?.cta_text ?? ""}
 原文案/转写：${analysis?.transcript ?? reel.caption ?? ""}
 

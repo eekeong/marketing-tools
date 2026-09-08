@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { colorForHandle, formatCount, hookTypeFromDb, ReelSource } from "@/lib/reelRadarTypes";
+import { colorForHandle, formatCount, formatStructureStep, hookTypeFromDb, ReelSource } from "@/lib/reelRadarTypes";
 
 const FORTY_EIGHT_HOURS_MS = 48 * 60 * 60 * 1000;
 const VIRAL_MULTIPLE_THRESHOLD = 1.5;
@@ -44,13 +44,16 @@ export async function GET(req: NextRequest) {
       plays: formatCount(r.play_count),
       playsNum: r.play_count,
       likes: formatCount(r.like_count),
+      comments: formatCount(r.comment_count),
       score: analysis?.relevance_score ?? 0,
       viralMultiple,
       isNew: Date.now() - new Date(r.first_seen_at).getTime() < FORTY_EIGHT_HOURS_MS,
       color: colorForHandle(r.owner_username),
       whyScored: analysis?.why_scored ?? "",
       hook: analysis?.hook_text ?? "",
-      structure: (analysis?.structure ?? []).join(" → "),
+      structure: ((analysis?.structure ?? []) as Parameters<typeof formatStructureStep>[0][])
+        .map((s) => formatStructureStep(s).title)
+        .join(" → "),
       cta: analysis?.cta_text ?? "",
       transcript: analysis?.transcript ?? r.caption ?? "",
       hasSpeech: analysis?.has_speech ?? true,

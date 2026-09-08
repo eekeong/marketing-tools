@@ -71,6 +71,18 @@ export interface ReelAnalysisRow {
   why_scored: string | null;
 }
 
+export interface StructureStep {
+  title: string;
+  description: string;
+}
+
+// Older analyzed reels stored `structure` as plain one-line strings; newer ones
+// store {title, description} pairs. Handle both so nothing crashes on old data.
+export function formatStructureStep(step: string | StructureStep): StructureStep {
+  if (typeof step === "string") return { title: step, description: "" };
+  return step;
+}
+
 export function formatCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;

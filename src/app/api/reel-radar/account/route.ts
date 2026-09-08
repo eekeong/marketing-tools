@@ -34,17 +34,30 @@ export async function GET() {
     hookUsage[zh] = (hookUsage[zh] ?? 0) + 1;
   }
 
-  const avg = plays.length ? plays.reduce((s, v) => s + v, 0) / plays.length : 0;
-  const myHits = rows.slice(0, 2).map((r) => ({
-    id: r.id,
-    title: `@${r.owner_username}`,
-    caption: r.caption ?? "",
-    plays: formatCount(r.play_count),
-    multiple: avg > 0 ? Math.round((r.play_count / avg) * 10) / 10 : 0,
-    color: colorForHandle(r.owner_username),
-    thumbnailUrl: r.thumbnail_url ?? null,
-    igUrl: r.ig_url,
-  }));
+  // "My hits" = reels beating what the rest of your own reels usually do, per the
+  // manual (超过平常2倍表现的reels) — not just "your top 2 by raw plays", and the
+  // average excludes the reel itself (same convention as the Radar/Discover viral
+  // badge), so one huge outlier doesn't inflate its own baseline.
+  const HIT_THRESHOLD = 2;
+  const sumPlays = plays.reduce((s, v) => s + v, 0);
+  const myHits = rows
+    .map((r) => {
+      const avgOthers = rows.length > 1 ? (sumPlays - r.play_count) / (rows.length - 1) : 0;
+      const multiple = avgOthers > 0 ? Math.round((r.play_count / avgOthers) * 10) / 10 : 0;
+      return {
+        id: r.id,
+        title: `@${r.owner_username}`,
+        caption: r.caption ?? "",
+        plays: formatCount(r.play_count),
+        multiple,
+        color: colorForHandle(r.owner_username),
+        thumbnailUrl: r.thumbnail_url ?? null,
+        igUrl: r.ig_url,
+      };
+    })
+    .filter((h) => h.multiple >= HIT_THRESHOLD)
+    .sort((a, b) => b.multiple - a.multiple)
+    .slice(0, 6);
 
   return NextResponse.json({
     stats: {

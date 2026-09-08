@@ -117,8 +117,11 @@ export function buildDiscoverInput(keywords: string[]): Record<string, unknown> 
   };
 }
 
+// Takes already-complete Instagram URLs (e.g. a specific reel/post link), unlike
+// buildRadarInput which builds profile URLs from bare usernames — don't route this
+// through that helper, or a full URL gets wrapped into an invalid nested one.
 export async function scrapeReelsByUrls(directUrls: string[], resultsLimit: number): Promise<ApifyReelItem[]> {
-  return runSync<ApifyReelItem>(buildRadarInput(directUrls, resultsLimit));
+  return runSync<ApifyReelItem>({ directUrls, resultsType: "reels", resultsLimit });
 }
 
 export async function scrapeReelsByKeywords(keywords: string[]): Promise<ApifyReelItem[]> {

@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import StatCard from "@/components/StatCard";
 import { useLanguage } from "@/lib/i18n";
 import { HOOK_TYPES, HookType } from "@/lib/reelRadarData";
 import { formatCount } from "@/lib/reelRadarTypes";
-import AddReelModal from "./AddReelModal";
 import ReelThumb from "./ReelThumb";
 import ScanProgressBar from "./ScanProgressBar";
+import SignalMeter from "./SignalMeter";
 import { useScan } from "./useScan";
 
 interface Reel {
@@ -17,34 +18,22 @@ interface Reel {
   plays: string;
   playsNum: number;
   likes: string;
+  comments: string;
   score: number;
   viralMultiple: number | null;
   isNew: boolean;
   color: string;
-  whyScored: string;
-  hook: string;
-  structure: string;
-  cta: string;
-  transcript: string;
   hasSpeech: boolean;
   language: string | null;
   caption: string;
-  rewrite: string | null;
-  remix: string | null;
   thumbnailUrl: string | null;
   igUrl: string;
 }
 
-function ScoreRing({ score }: { score: number }) {
-  const pct = (score / 10) * 100;
-  return (
-    <div
-      className="w-11 h-11 rounded-full flex items-center justify-center text-xs font-semibold shrink-0"
-      style={{ background: `conic-gradient(var(--brand-pink) ${pct}%, var(--border) ${pct}%)` }}
-    >
-      <div className="w-8 h-8 rounded-full bg-surface flex items-center justify-center">{score}</div>
-    </div>
-  );
+function pillClass(active: boolean) {
+  return `rounded-full px-3 py-1.5 text-xs font-medium border transition ${
+    active ? "brand-gradient text-white border-transparent" : "text-muted border-border hover:bg-background"
+  }`;
 }
 
 export default function RadarTab({
@@ -57,19 +46,19 @@ export default function RadarTab({
   setHookFilter: (h: HookType | "all") => void;
 }) {
   const { t } = useLanguage();
+  const router = useRouter();
   const [reels, setReels] = useState<Reel[]>([]);
   const [accountCount, setAccountCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState<"newest" | "score" | "views">("score");
-  const [modalOpen, setModalOpen] = useState(false);
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [genShown, setGenShown] = useState<Record<string, "rewrite" | "remix">>({});
-  const [transcriptOpen, setTranscriptOpen] = useState<Record<string, boolean>>({});
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [visibleCount, setVisibleCount] = useState(20);
   const [showLowScore, setShowLowScore] = useState(false);
   const [languageFilter, setLanguageFilter] = useState<string>("all");
+  const [quickUrl, setQuickUrl] = useState("");
+  const [quickBusy, setQuickBusy] = useState(false);
+  const [quickError, setQuickError] = useState<string | null>(null);
 
   const load = async () => {
     const [reelsRes, compRes] = await Promise.all([
@@ -106,25 +95,6 @@ export default function RadarTab({
   for (const r of reels) hookCounts.set(r.hookType, (hookCounts.get(r.hookType) ?? 0) + 1);
   const topHook = [...hookCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—";
 
-  const handleGenerate = async (id: string, mode: "rewrite" | "remix") => {
-    setBusyId(id);
-    try {
-      const res = await fetch(`/api/reel-radar/reels/${id}/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Failed");
-      setReels((prev) => prev.map((r) => (r.id === id ? { ...r, [mode === "rewrite" ? "rewrite" : "remix"]: json.text } : r)));
-      setGenShown((prev) => ({ ...prev, [id]: mode }));
-    } catch (err) {
-      alert((err as Error).message);
-    } finally {
-      setBusyId(null);
-    }
-  };
-
   const toggleSelected = (id: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -147,41 +117,91 @@ export default function RadarTab({
     load();
   };
 
+  const handleDeleteOne = async (id: string) => {
+    await fetch("/api/reel-radar/reels", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: [id] }),
+    });
+    load();
+  };
+
+  const handleQuickAdd = async () => {
+    if (!quickUrl.trim()) return;
+    setQuickBusy(true);
+    setQuickError(null);
+    try {
+      const res = await fetch("/api/reel-radar/reels/quick-add", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: quickUrl.trim() }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed");
+      router.push(`/reel-radar/reel/${json.reelId}`);
+    } catch (err) {
+      setQuickError((err as Error).message);
+    } finally {
+      setQuickBusy(false);
+    }
+  };
+
   return (
     <div>
-      <div className="flex items-start justify-between gap-3 mb-6">
-        <p className="text-sm text-muted max-w-2xl">{t("reelradar.subtitle")}</p>
-        <div className="flex items-center gap-2 shrink-0">
-          <button onClick={onOpenActivity} className="text-xs font-medium text-muted hover:text-brand-pink transition">
-            {t("reelradar.activityLog")}
-          </button>
-          <button
-            onClick={() => setModalOpen(true)}
-            className="rounded-xl border border-border text-sm font-medium px-4 py-2.5 hover:bg-background transition"
-          >
-            {t("reelradar.scanButton")}
-          </button>
-          <button
-            onClick={startScan}
-            disabled={scanning}
-            className="rounded-xl brand-gradient text-white text-sm font-medium px-4 py-2.5 shadow-sm hover:opacity-90 transition disabled:opacity-60"
-          >
-            {scanning ? t("reelradar.scanning") : t("reelradar.scanNowButton")}
-          </button>
-        </div>
+      <p className="text-sm text-muted max-w-2xl mb-4">{t("reelradar.subtitle")}</p>
+
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-base font-semibold">{t("reelradar.overviewTitle")}</h2>
+        <button onClick={onOpenActivity} className="text-xs font-medium text-muted hover:text-brand-pink transition">
+          {t("reelradar.activityLog")} →
+        </button>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         <StatCard label={t("reelradar.statAccounts")} value={accountCount} />
         <StatCard label={t("reelradar.statAnalyzed")} value={reels.length} />
         <StatCard label={t("reelradar.statViews")} value={formatCount(totalViews)} />
         <StatCard label={t("reelradar.statTopHook")} value={topHook} />
       </div>
 
-      {scanning && <ScanProgressBar progress={progress} onCancel={cancelScan} />}
+      <button
+        onClick={startScan}
+        disabled={scanning}
+        className="w-full rounded-2xl brand-gradient text-white text-base font-semibold py-4 shadow-sm hover:opacity-90 transition disabled:opacity-60"
+      >
+        {scanning ? t("reelradar.scanning") : t("reelradar.scanNowButton")}
+      </button>
+      {!scanning && <p className="text-xs text-muted text-center mt-2 mb-6">{t("reelradar.scanCostHint")}</p>}
+      {scanning && (
+        <div className="mt-4 mb-6">
+          <ScanProgressBar progress={progress} onCancel={cancelScan} />
+        </div>
+      )}
       {scanError && <p className="text-xs text-red-500 mb-4">{scanError}</p>}
 
-      <div className="flex flex-wrap items-center gap-2 mb-2">
+      <div className="rounded-2xl border border-border bg-surface p-4 mb-8">
+        <p className="text-sm font-semibold mb-1">{t("reelradar.quickAddTitle")}</p>
+        <p className="text-xs text-muted mb-3">{t("reelradar.quickAddDesc")}</p>
+        <div className="flex gap-2">
+          <input
+            value={quickUrl}
+            onChange={(e) => setQuickUrl(e.target.value)}
+            placeholder={t("reelradar.quickAddPlaceholder")}
+            className="flex-1 rounded-lg border border-border bg-background text-foreground px-3 py-2 text-sm"
+          />
+          <button
+            onClick={handleQuickAdd}
+            disabled={quickBusy || !quickUrl.trim()}
+            className="rounded-lg brand-gradient text-white text-sm font-medium px-4 py-2 disabled:opacity-50 shrink-0"
+          >
+            {quickBusy ? t("reelradar.quickAddAnalyzing") : t("reelradar.quickAddButton")}
+          </button>
+        </div>
+        {quickError && <p className="text-xs text-red-500 mt-2">{quickError}</p>}
+        <p className="text-[11px] text-muted mt-2">{t("reelradar.quickAddHint")}</p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 mb-3">
         {(
           [
             { key: "newest", label: t("reelradar.sortNewest") },
@@ -189,29 +209,10 @@ export default function RadarTab({
             { key: "views", label: t("reelradar.sortMostViews") },
           ] as const
         ).map((opt) => (
-          <button
-            key={opt.key}
-            onClick={() => setSort(opt.key)}
-            className={`rounded-full px-3 py-1.5 text-xs font-medium border transition ${
-              sort === opt.key ? "brand-gradient text-white border-transparent" : "text-muted border-border"
-            }`}
-          >
+          <button key={opt.key} onClick={() => setSort(opt.key)} className={pillClass(sort === opt.key)}>
             {opt.label}
           </button>
         ))}
-        <div className="w-px h-5 bg-border mx-1" />
-        <select
-          value={hookFilter}
-          onChange={(e) => setHookFilter(e.target.value as HookType | "all")}
-          className="rounded-full border border-border px-3 py-1.5 text-xs font-medium text-muted bg-surface focus:outline-none"
-        >
-          <option value="all">{t("reelradar.allHooks")}</option>
-          {HOOK_TYPES.map((h) => (
-            <option key={h} value={h}>
-              {h}
-            </option>
-          ))}
-        </select>
         {languages.length > 0 && (
           <select
             value={languageFilter}
@@ -226,6 +227,9 @@ export default function RadarTab({
             ))}
           </select>
         )}
+        <button onClick={() => setShowLowScore((v) => !v)} className={pillClass(showLowScore)}>
+          {showLowScore ? t("reelradar.hideLowScoreAgain") : t("reelradar.lowScoreHidden")}
+        </button>
         <div className="flex-1" />
         {selectMode ? (
           <>
@@ -255,11 +259,16 @@ export default function RadarTab({
           </button>
         )}
       </div>
-      <div className="flex items-center gap-2 mb-4">
-        <p className="text-[11px] text-muted">{t("reelradar.lowScoreHidden")}</p>
-        <button onClick={() => setShowLowScore((v) => !v)} className="text-[11px] font-medium text-brand-pink hover:opacity-80 transition">
-          {showLowScore ? t("reelradar.hideLowScoreAgain") : t("reelradar.showLowScore")}
+
+      <div className="flex flex-wrap gap-2 mb-6">
+        <button onClick={() => setHookFilter("all")} className={pillClass(hookFilter === "all")}>
+          {t("reelradar.allHooks")}
         </button>
+        {HOOK_TYPES.map((h) => (
+          <button key={h} onClick={() => setHookFilter(h)} className={pillClass(hookFilter === h)}>
+            {h}
+          </button>
+        ))}
       </div>
 
       {loading ? (
@@ -267,123 +276,58 @@ export default function RadarTab({
       ) : visible.length === 0 ? (
         <p className="text-sm text-muted">{t("reelradar.empty")}</p>
       ) : (
-        <div className="space-y-4">
-          {visible.map((reel) => {
-            const showTranscript = transcriptOpen[reel.id];
-            const genMode = genShown[reel.id];
-            const genText = genMode === "rewrite" ? reel.rewrite : genMode === "remix" ? reel.remix : null;
-            return (
-              <div key={reel.id} className="rounded-2xl border border-border bg-surface overflow-hidden">
-                <div className="flex flex-col sm:flex-row">
-                  <div className="sm:w-44 h-56 sm:h-auto shrink-0 relative">
-                    <ReelThumb thumbnailUrl={reel.thumbnailUrl} igUrl={reel.igUrl} color={reel.color} className="w-full h-full">
-                      <div className="absolute top-2 left-2 flex gap-1 z-10">
-                        {reel.isNew && (
-                          <span className="rounded-full bg-white/90 text-[10px] font-semibold px-2 py-0.5 text-foreground">
-                            {t("reelradar.new")}
-                          </span>
-                        )}
-                        {reel.viralMultiple && (
-                          <span className="rounded-full bg-yellow-400 text-[10px] font-semibold px-2 py-0.5 text-black">
-                            {t("reelradar.viral")} ×{reel.viralMultiple}
-                          </span>
-                        )}
-                        {!reel.hasSpeech && (
-                          <span className="rounded-full bg-gray-500/90 text-[10px] font-semibold px-2 py-0.5 text-white">
-                            {t("reelradar.captionOnly")}
-                          </span>
-                        )}
-                      </div>
-                      <div className="absolute bottom-2 left-2 text-[11px] bg-black/40 rounded-full px-2 py-0.5 z-10">
-                        ▶ {reel.plays} · ♥ {reel.likes}
-                      </div>
-                    </ReelThumb>
-                    {selectMode && (
-                      <input
-                        type="checkbox"
-                        checked={selected.has(reel.id)}
-                        onChange={() => toggleSelected(reel.id)}
-                        className="absolute top-2 right-2 w-4 h-4 z-20"
-                      />
+        <div className="space-y-3">
+          {visible.map((reel) => (
+            <div key={reel.id} className="rounded-2xl border border-border bg-surface p-3.5 flex items-start gap-3">
+              {selectMode && (
+                <input
+                  type="checkbox"
+                  checked={selected.has(reel.id)}
+                  onChange={() => toggleSelected(reel.id)}
+                  className="w-4 h-4 mt-1 shrink-0"
+                />
+              )}
+              <button
+                onClick={() => router.push(`/reel-radar/reel/${reel.id}`)}
+                className="flex items-start gap-3 flex-1 min-w-0 text-left"
+              >
+                <ReelThumb thumbnailUrl={reel.thumbnailUrl} igUrl={reel.igUrl} color={reel.color} className="w-16 h-16 rounded-xl text-lg shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap mb-1">
+                    <span className="text-sm font-semibold">{reel.account}</span>
+                    {reel.viralMultiple && (
+                      <span className="rounded-full bg-yellow-400 text-[10px] font-semibold px-2 py-0.5 text-black">
+                        {t("reelradar.viral")} ×{reel.viralMultiple}
+                      </span>
+                    )}
+                    {reel.isNew && (
+                      <span className="rounded-full bg-brand-pink/15 text-brand-pink text-[10px] font-semibold px-2 py-0.5">
+                        {t("reelradar.new")}
+                      </span>
+                    )}
+                    {!reel.hasSpeech && (
+                      <span className="rounded-full bg-border text-muted text-[10px] font-semibold px-2 py-0.5">
+                        {t("reelradar.captionOnly")}
+                      </span>
                     )}
                   </div>
-
-                  <div className="flex-1 p-4 space-y-3 min-w-0">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <a
-                          href={reel.igUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-sm font-semibold hover:text-brand-pink transition"
-                        >
-                          {reel.account}
-                        </a>
-                        <p className="text-xs text-muted">{reel.hookType}</p>
-                        {reel.caption && <p className="text-xs text-foreground/70 mt-1 line-clamp-2">{reel.caption}</p>}
-                      </div>
-                      <ScoreRing score={reel.score} />
-                    </div>
-
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 text-xs">
-                      <div>
-                        <p className="font-medium text-muted mb-0.5">{t("reelradar.whyScored")}</p>
-                        <p className="text-foreground/80 leading-relaxed">{reel.whyScored}</p>
-                      </div>
-                      <div>
-                        <p className="font-medium text-muted mb-0.5">{t("reelradar.hook")}</p>
-                        <p className="text-foreground/80 leading-relaxed">{reel.hook}</p>
-                      </div>
-                      <div>
-                        <p className="font-medium text-muted mb-0.5">{t("reelradar.structure")}</p>
-                        <p className="text-foreground/80 leading-relaxed">{reel.structure}</p>
-                      </div>
-                      <div>
-                        <p className="font-medium text-muted mb-0.5">{t("reelradar.cta")}</p>
-                        <p className="text-foreground/80 leading-relaxed">{reel.cta}</p>
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() => setTranscriptOpen((prev) => ({ ...prev, [reel.id]: !prev[reel.id] }))}
-                      className="text-[11px] font-medium text-muted hover:text-brand-pink transition"
-                    >
-                      {showTranscript ? t("reelradar.hideTranscript") : t("reelradar.showTranscript")}
-                    </button>
-                    {showTranscript && (
-                      <p className="text-xs text-foreground/70 leading-relaxed bg-background rounded-lg p-3">{reel.transcript}</p>
-                    )}
-
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => handleGenerate(reel.id, "rewrite")}
-                        disabled={busyId === reel.id}
-                        className="rounded-lg border border-border text-xs font-medium px-3 py-1.5 hover:bg-background transition disabled:opacity-60"
-                      >
-                        {busyId === reel.id ? t("reelradar.rewriting") : t("reelradar.rewrite")}
-                      </button>
-                      <button
-                        onClick={() => handleGenerate(reel.id, "remix")}
-                        disabled={busyId === reel.id}
-                        className="rounded-lg border border-border text-xs font-medium px-3 py-1.5 hover:bg-background transition disabled:opacity-60"
-                      >
-                        {busyId === reel.id ? t("reelradar.rewriting") : t("reelradar.remix")}
-                      </button>
-                    </div>
-
-                    {genText && (
-                      <div className="rounded-xl brand-gradient-soft border border-brand-pink/20 p-3 text-xs">
-                        <p className="font-medium text-brand-pink mb-1">
-                          {genMode === "rewrite" ? t("reelradar.rewriteResultTitle") : t("reelradar.remix")}
-                        </p>
-                        <p className="whitespace-pre-wrap leading-relaxed text-foreground/90">{genText}</p>
-                      </div>
-                    )}
-                  </div>
+                  <span className="inline-block rounded-full bg-background border border-border text-[11px] px-2 py-0.5 text-muted mb-1">
+                    {reel.hookType}
+                  </span>
+                  {reel.caption && <p className="text-xs text-foreground/70 line-clamp-2 mb-1">{reel.caption}</p>}
+                  <p className="text-[11px] text-muted">
+                    ▶ {reel.plays} · ♥ {reel.likes} · 💬 {reel.comments}
+                  </p>
                 </div>
+              </button>
+              <div className="flex flex-col items-end gap-2 shrink-0">
+                <SignalMeter score={reel.score} />
+                <button onClick={() => handleDeleteOne(reel.id)} className="text-[11px] text-muted hover:text-red-500 transition">
+                  {t("action.delete")}
+                </button>
               </div>
-            );
-          })}
+            </div>
+          ))}
         </div>
       )}
 
@@ -397,8 +341,6 @@ export default function RadarTab({
           </button>
         </div>
       )}
-
-      {modalOpen && <AddReelModal source="radar" onClose={() => setModalOpen(false)} onAdded={load} />}
     </div>
   );
 }
