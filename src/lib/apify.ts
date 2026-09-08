@@ -11,9 +11,12 @@ export interface ApifyReelItem {
   videoPlayCount?: number | null;
   videoViewCount?: number | null;
   videoUrl?: string | null;
+  displayUrl?: string | null;
   videoDuration?: number | null;
   timestamp?: string | null;
   productType?: string;
+  // Which /explore/tags/<hashtag>/ directUrl produced this item (discover scans only).
+  inputUrl?: string;
   // Present instead of the fields above when the actor couldn't fetch this URL
   // (private/nonexistent account, rate limited, etc.)
   error?: string;
@@ -43,11 +46,14 @@ export async function scrapeReelsByUrls(directUrls: string[], resultsLimit: numb
   return runSync<ApifyReelItem>({ directUrls, resultsType: "reels", resultsLimit });
 }
 
+// The actor's `search` + searchType:"hashtag" field resolves keywords via a fuzzy
+// Google-assisted lookup that frequently maps them to unrelated, empty hashtags
+// (verified: every one of a real 7-keyword batch resolved to a 0-post garbage tag).
+// Hitting /explore/tags/<hashtag>/ directly via directUrls is reliable instead.
+// resultsLimit is applied per-URL by the actor, so it's divided across keywords
+// here to keep the total (and cost) roughly in line with what the caller asked for.
 export async function scrapeReelsByKeywords(keywords: string[], resultsLimit: number): Promise<ApifyReelItem[]> {
-  return runSync<ApifyReelItem>({
-    search: keywords.join(", "),
-    searchType: "hashtag",
-    resultsType: "reels",
-    resultsLimit,
-  });
+  const perKeywordLimit = Math.max(2, Math.floor(resultsLimit / keywords.length));
+  const directUrls = keywords.map((k) => `https://www.instagram.com/explore/tags/${encodeURIComponent(k.replace(/\s+/g, ""))}/`);
+  return runSync<ApifyReelItem>({ directUrls, resultsType: "reels", resultsLimit: perKeywordLimit });
 }

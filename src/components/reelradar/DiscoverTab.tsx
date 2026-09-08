@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useLanguage } from "@/lib/i18n";
 import AddReelModal from "./AddReelModal";
+import ReelThumb from "./ReelThumb";
 
 interface Reel {
   id: string;
@@ -11,6 +12,10 @@ interface Reel {
   plays: string;
   score: number;
   color: string;
+  discoveredVia: string | null;
+  caption: string;
+  thumbnailUrl: string | null;
+  igUrl: string;
 }
 
 interface Keyword {
@@ -138,17 +143,18 @@ export default function DiscoverTab() {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {reels.map((r) => (
                 <div key={r.id} className="rounded-2xl border border-border bg-surface overflow-hidden">
-                  <div
-                    className="h-28 flex items-center justify-center text-white text-2xl"
-                    style={{ background: `linear-gradient(160deg, ${r.color}, ${r.color}88)` }}
-                  >
-                    ▶
-                  </div>
+                  <ReelThumb thumbnailUrl={r.thumbnailUrl} igUrl={r.igUrl} color={r.color} className="h-28 w-full text-2xl" />
                   <div className="p-3">
-                    <p className="text-sm font-medium">{r.account}</p>
+                    <a href={r.igUrl} target="_blank" rel="noopener noreferrer" className="text-sm font-medium hover:text-brand-pink">
+                      {r.account}
+                    </a>
                     <p className="text-[11px] text-muted">
                       {r.hookType} · {r.plays} · {r.score}/10
                     </p>
+                    {r.caption && <p className="text-[11px] text-foreground/70 mt-1 line-clamp-2">{r.caption}</p>}
+                    {r.discoveredVia && (
+                      <p className="text-[11px] text-brand-pink mt-1">#{r.discoveredVia}</p>
+                    )}
                   </div>
                 </div>
               ))}

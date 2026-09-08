@@ -4,13 +4,17 @@ import { useEffect, useState } from "react";
 import StatCard from "@/components/StatCard";
 import { useLanguage } from "@/lib/i18n";
 import AddReelModal from "./AddReelModal";
+import ReelThumb from "./ReelThumb";
 
 interface Hit {
   id: string;
   title: string;
+  caption: string;
   plays: string;
   multiple: number;
   color: string;
+  thumbnailUrl: string | null;
+  igUrl: string;
 }
 
 interface HookStat {
@@ -122,14 +126,17 @@ export default function AccountTab() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {myHits.map((hit) => (
               <div key={hit.id} className="rounded-xl border border-border bg-surface p-3.5 flex items-center gap-3">
-                <div
-                  className="w-12 h-12 rounded-lg flex items-center justify-center text-white text-lg shrink-0"
-                  style={{ background: `linear-gradient(160deg, ${hit.color}, ${hit.color}88)` }}
-                >
-                  ▶
-                </div>
+                <ReelThumb
+                  thumbnailUrl={hit.thumbnailUrl}
+                  igUrl={hit.igUrl}
+                  color={hit.color}
+                  className="w-12 h-12 rounded-lg text-lg shrink-0"
+                />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{hit.title}</p>
+                  <a href={hit.igUrl} target="_blank" rel="noopener noreferrer" className="text-sm font-medium truncate hover:text-brand-pink block">
+                    {hit.title}
+                  </a>
+                  {hit.caption && <p className="text-[11px] text-muted truncate">{hit.caption}</p>}
                   <p className="text-[11px] text-muted">
                     {hit.plays} · <span className="text-yellow-600 font-medium">×{hit.multiple}</span>
                   </p>

@@ -23,6 +23,10 @@ export interface ReelInput {
   durationSec?: number | null;
   postedAt?: string | null;
   source: ReelSource;
+  discoveredVia?: string | null;
+  thumbnailUrl?: string | null;
+  videoUrl?: string | null;
+  raw?: unknown;
 }
 
 export async function analyzeAndStoreReel(input: ReelInput) {
@@ -77,6 +81,10 @@ ${input.text}
       like_count: input.likes,
       comment_count: input.comments,
       source: input.source,
+      discovered_via: input.discoveredVia ?? null,
+      thumbnail_url: input.thumbnailUrl ?? null,
+      video_url: input.videoUrl ?? null,
+      raw: input.raw ?? null,
     })
     .select()
     .single();

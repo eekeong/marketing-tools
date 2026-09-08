@@ -106,6 +106,9 @@ export async function POST(req: NextRequest) {
       continue;
     }
 
+    const discoveredVia =
+      type === "discover" && item.inputUrl ? decodeURIComponent(item.inputUrl.match(/\/tags\/([^/]+)/)?.[1] ?? "") || null : null;
+
     try {
       const result = await analyzeAndStoreReel({
         shortcode,
@@ -119,6 +122,10 @@ export async function POST(req: NextRequest) {
         durationSec: item.videoDuration ?? null,
         postedAt: item.timestamp ?? null,
         source: type,
+        discoveredVia,
+        thumbnailUrl: item.displayUrl ?? null,
+        videoUrl: item.videoUrl ?? null,
+        raw: item,
       });
       done += 1;
       costUsd += result.costUsd;

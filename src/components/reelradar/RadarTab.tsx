@@ -6,6 +6,7 @@ import { useLanguage } from "@/lib/i18n";
 import { HOOK_TYPES, HookType } from "@/lib/reelRadarData";
 import { formatCount } from "@/lib/reelRadarTypes";
 import AddReelModal from "./AddReelModal";
+import ReelThumb from "./ReelThumb";
 
 interface Reel {
   id: string;
@@ -23,8 +24,11 @@ interface Reel {
   structure: string;
   cta: string;
   transcript: string;
+  caption: string;
   rewrite: string | null;
   remix: string | null;
+  thumbnailUrl: string | null;
+  igUrl: string;
 }
 
 function ScoreRing({ score }: { score: number }) {
@@ -255,41 +259,47 @@ export default function RadarTab({
             return (
               <div key={reel.id} className="rounded-2xl border border-border bg-surface overflow-hidden">
                 <div className="flex flex-col sm:flex-row">
-                  <div
-                    className="sm:w-44 h-56 sm:h-auto shrink-0 flex items-center justify-center text-white text-3xl relative"
-                    style={{ background: `linear-gradient(160deg, ${reel.color}, ${reel.color}88)` }}
-                  >
+                  <div className="sm:w-44 h-56 sm:h-auto shrink-0 relative">
+                    <ReelThumb thumbnailUrl={reel.thumbnailUrl} igUrl={reel.igUrl} color={reel.color} className="w-full h-full">
+                      <div className="absolute top-2 left-2 flex gap-1 z-10">
+                        {reel.isNew && (
+                          <span className="rounded-full bg-white/90 text-[10px] font-semibold px-2 py-0.5 text-foreground">
+                            {t("reelradar.new")}
+                          </span>
+                        )}
+                        {reel.viralMultiple && (
+                          <span className="rounded-full bg-yellow-400 text-[10px] font-semibold px-2 py-0.5 text-black">
+                            {t("reelradar.viral")} ×{reel.viralMultiple}
+                          </span>
+                        )}
+                      </div>
+                      <div className="absolute bottom-2 left-2 text-[11px] bg-black/40 rounded-full px-2 py-0.5 z-10">
+                        ▶ {reel.plays} · ♥ {reel.likes}
+                      </div>
+                    </ReelThumb>
                     {selectMode && (
                       <input
                         type="checkbox"
                         checked={selected.has(reel.id)}
                         onChange={() => toggleSelected(reel.id)}
-                        className="absolute top-2 right-2 w-4 h-4"
+                        className="absolute top-2 right-2 w-4 h-4 z-20"
                       />
                     )}
-                    ▶
-                    <div className="absolute top-2 left-2 flex gap-1">
-                      {reel.isNew && (
-                        <span className="rounded-full bg-white/90 text-[10px] font-semibold px-2 py-0.5 text-foreground">
-                          {t("reelradar.new")}
-                        </span>
-                      )}
-                      {reel.viralMultiple && (
-                        <span className="rounded-full bg-yellow-400 text-[10px] font-semibold px-2 py-0.5 text-black">
-                          {t("reelradar.viral")} ×{reel.viralMultiple}
-                        </span>
-                      )}
-                    </div>
-                    <div className="absolute bottom-2 left-2 text-[11px] bg-black/40 rounded-full px-2 py-0.5">
-                      ▶ {reel.plays} · ♥ {reel.likes}
-                    </div>
                   </div>
 
                   <div className="flex-1 p-4 space-y-3 min-w-0">
                     <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-semibold">{reel.account}</p>
+                      <div className="min-w-0">
+                        <a
+                          href={reel.igUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm font-semibold hover:text-brand-pink transition"
+                        >
+                          {reel.account}
+                        </a>
                         <p className="text-xs text-muted">{reel.hookType}</p>
+                        {reel.caption && <p className="text-xs text-foreground/70 mt-1 line-clamp-2">{reel.caption}</p>}
                       </div>
                       <ScoreRing score={reel.score} />
                     </div>

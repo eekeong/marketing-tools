@@ -51,8 +51,12 @@ export async function GET(req: NextRequest) {
       structure: (analysis?.structure ?? []).join(" → "),
       cta: analysis?.cta_text ?? "",
       transcript: analysis?.transcript ?? r.caption ?? "",
+      caption: r.caption ?? "",
       rewrite: latestOf("rewrite_structure"),
       remix: latestOf("copy_script"),
+      discoveredVia: r.discovered_via ?? null,
+      thumbnailUrl: r.thumbnail_url ?? null,
+      igUrl: r.ig_url,
     };
   });
 

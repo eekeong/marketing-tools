@@ -13,7 +13,7 @@ export async function GET() {
   const [{ data: mine, error }, { data: diagnosis }] = await Promise.all([
     supabaseAdmin
       .from("reels")
-      .select("id, owner_username, play_count, reel_analysis(hook_type, has_speech)")
+      .select("id, owner_username, play_count, caption, thumbnail_url, ig_url, reel_analysis(hook_type, has_speech)")
       .eq("source", "mine")
       .order("play_count", { ascending: false }),
     supabaseAdmin.from("account_diagnosis").select("*").order("generated_at", { ascending: false }).limit(1).maybeSingle(),
@@ -38,9 +38,12 @@ export async function GET() {
   const myHits = rows.slice(0, 2).map((r) => ({
     id: r.id,
     title: `@${r.owner_username}`,
+    caption: r.caption ?? "",
     plays: formatCount(r.play_count),
     multiple: avg > 0 ? Math.round((r.play_count / avg) * 10) / 10 : 0,
     color: colorForHandle(r.owner_username),
+    thumbnailUrl: r.thumbnail_url ?? null,
+    igUrl: r.ig_url,
   }));
 
   return NextResponse.json({
