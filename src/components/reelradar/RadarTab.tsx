@@ -7,6 +7,8 @@ import { HOOK_TYPES, HookType } from "@/lib/reelRadarData";
 import { formatCount } from "@/lib/reelRadarTypes";
 import AddReelModal from "./AddReelModal";
 import ReelThumb from "./ReelThumb";
+import ScanProgressBar from "./ScanProgressBar";
+import { useScan } from "./useScan";
 
 interface Reel {
   id: string;
@@ -24,6 +26,8 @@ interface Reel {
   structure: string;
   cta: string;
   transcript: string;
+  hasSpeech: boolean;
+  language: string | null;
   caption: string;
   rewrite: string | null;
   remix: string | null;
@@ -58,13 +62,14 @@ export default function RadarTab({
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState<"newest" | "score" | "views">("score");
   const [modalOpen, setModalOpen] = useState(false);
-  const [scanning, setScanning] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [genShown, setGenShown] = useState<Record<string, "rewrite" | "remix">>({});
   const [transcriptOpen, setTranscriptOpen] = useState<Record<string, boolean>>({});
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [visibleCount, setVisibleCount] = useState(3);
+  const [visibleCount, setVisibleCount] = useState(20);
+  const [showLowScore, setShowLowScore] = useState(false);
+  const [languageFilter, setLanguageFilter] = useState<string>("all");
 
   const load = async () => {
     const [reelsRes, compRes] = await Promise.all([
@@ -80,7 +85,15 @@ export default function RadarTab({
     load();
   }, []);
 
-  const filtered = reels.filter((r) => hookFilter === "all" || r.hookType === hookFilter);
+  const { progress, error: scanError, start: startScan, cancel: cancelScan, scanning } = useScan("radar", load);
+
+  const languages = Array.from(new Set(reels.map((r) => r.language).filter((l): l is string => !!l)));
+  const filtered = reels.filter(
+    (r) =>
+      (hookFilter === "all" || r.hookType === hookFilter) &&
+      (languageFilter === "all" || r.language === languageFilter) &&
+      (showLowScore || r.score > 3),
+  );
   const sorted = [...filtered].sort((a, b) => {
     if (sort === "score") return b.score - a.score;
     if (sort === "views") return b.playsNum - a.playsNum;
@@ -109,25 +122,6 @@ export default function RadarTab({
       alert((err as Error).message);
     } finally {
       setBusyId(null);
-    }
-  };
-
-  const handleScan = async () => {
-    setScanning(true);
-    try {
-      const res = await fetch("/api/reel-radar/scan", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "radar" }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Failed");
-      alert(t("reelradar.scanDone", { done: String(json.done), failed: String(json.failed) }));
-      load();
-    } catch (err) {
-      alert((err as Error).message);
-    } finally {
-      setScanning(false);
     }
   };
 
@@ -168,7 +162,7 @@ export default function RadarTab({
             {t("reelradar.scanButton")}
           </button>
           <button
-            onClick={handleScan}
+            onClick={startScan}
             disabled={scanning}
             className="rounded-xl brand-gradient text-white text-sm font-medium px-4 py-2.5 shadow-sm hover:opacity-90 transition disabled:opacity-60"
           >
@@ -183,6 +177,9 @@ export default function RadarTab({
         <StatCard label={t("reelradar.statViews")} value={formatCount(totalViews)} />
         <StatCard label={t("reelradar.statTopHook")} value={topHook} />
       </div>
+
+      {scanning && <ScanProgressBar progress={progress} onCancel={cancelScan} />}
+      {scanError && <p className="text-xs text-red-500 mb-4">{scanError}</p>}
 
       <div className="flex flex-wrap items-center gap-2 mb-2">
         {(
@@ -215,6 +212,20 @@ export default function RadarTab({
             </option>
           ))}
         </select>
+        {languages.length > 0 && (
+          <select
+            value={languageFilter}
+            onChange={(e) => setLanguageFilter(e.target.value)}
+            className="rounded-full border border-border px-3 py-1.5 text-xs font-medium text-muted bg-surface focus:outline-none"
+          >
+            <option value="all">{t("reelradar.allLanguages")}</option>
+            {languages.map((l) => (
+              <option key={l} value={l}>
+                {l}
+              </option>
+            ))}
+          </select>
+        )}
         <div className="flex-1" />
         {selectMode ? (
           <>
@@ -244,7 +255,12 @@ export default function RadarTab({
           </button>
         )}
       </div>
-      <p className="text-[11px] text-muted mb-4">{t("reelradar.lowScoreHidden")}</p>
+      <div className="flex items-center gap-2 mb-4">
+        <p className="text-[11px] text-muted">{t("reelradar.lowScoreHidden")}</p>
+        <button onClick={() => setShowLowScore((v) => !v)} className="text-[11px] font-medium text-brand-pink hover:opacity-80 transition">
+          {showLowScore ? t("reelradar.hideLowScoreAgain") : t("reelradar.showLowScore")}
+        </button>
+      </div>
 
       {loading ? (
         <p className="text-sm text-muted">{t("reelradar.loading")}</p>
@@ -270,6 +286,11 @@ export default function RadarTab({
                         {reel.viralMultiple && (
                           <span className="rounded-full bg-yellow-400 text-[10px] font-semibold px-2 py-0.5 text-black">
                             {t("reelradar.viral")} ×{reel.viralMultiple}
+                          </span>
+                        )}
+                        {!reel.hasSpeech && (
+                          <span className="rounded-full bg-gray-500/90 text-[10px] font-semibold px-2 py-0.5 text-white">
+                            {t("reelradar.captionOnly")}
                           </span>
                         )}
                       </div>
@@ -369,7 +390,7 @@ export default function RadarTab({
       {visibleCount < sorted.length && (
         <div className="mt-5 text-center">
           <button
-            onClick={() => setVisibleCount((v) => v + 3)}
+            onClick={() => setVisibleCount((v) => v + 20)}
             className="rounded-xl border border-border text-sm font-medium px-4 py-2 hover:bg-background transition"
           >
             {t("reelradar.loadMore")}

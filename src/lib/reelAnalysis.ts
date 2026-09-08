@@ -9,6 +9,29 @@ interface AnalysisResult {
   ctaText: string;
   whyScored: string;
   relevanceScore: number;
+  transcript: string;
+  hasSpeech: boolean;
+  language: string;
+}
+
+// Reels are short, but a video download+base64 pass through the request body still
+// costs latency/memory — cap how big a file we'll bother inlining before giving up
+// and falling back to caption-only analysis.
+const MAX_INLINE_VIDEO_BYTES = 15 * 1024 * 1024;
+
+async function fetchVideoInline(videoUrl: string): Promise<{ base64: string; mimeType: string } | null> {
+  try {
+    const res = await fetch(videoUrl);
+    if (!res.ok) return null;
+    const contentLength = Number(res.headers.get("content-length") ?? "0");
+    if (contentLength && contentLength > MAX_INLINE_VIDEO_BYTES) return null;
+    const buf = await res.arrayBuffer();
+    if (buf.byteLength > MAX_INLINE_VIDEO_BYTES) return null;
+    const mimeType = res.headers.get("content-type")?.split(";")[0] || "video/mp4";
+    return { base64: Buffer.from(buf).toString("base64"), mimeType };
+  } catch {
+    return null;
+  }
 }
 
 export interface ReelInput {
@@ -32,29 +55,58 @@ export interface ReelInput {
 export async function analyzeAndStoreReel(input: ReelInput) {
   const { data: settings } = await supabaseAdmin.from("settings").select("*").eq("id", 1).single();
 
-  const prompt = `你是一个短视频营销分析师，帮马来西亚的教育机构「英雄教育」拆解竞品/参考短视频，判断它值不值得模仿。
+  // Manual add / any item without a reachable videoUrl falls back to caption-only,
+  // same as before Phase B — a failed transcription attempt should never sink the item.
+  const video = input.videoUrl ? await fetchVideoInline(input.videoUrl) : null;
+
+  const prompt = video
+    ? `你是一个短视频营销分析师，帮马来西亚的教育机构「英雄教育」拆解竞品/参考短视频，判断它值不值得模仿。
 
 机构背景：${settings?.niche_description ?? "补习教育机构"}
 卖点：${settings?.what_i_sell ?? ""}
 
-要分析的视频信息：
+要分析的视频：@${input.account}，附带的文案是：${input.text}
+数据：播放 ${input.plays}，点赞 ${input.likes}，评论 ${input.comments}
+
+请先完整看完/听完这支视频，再用中文输出结构化拆解：
+1. transcript：视频里实际说出来的口播内容，逐字转写（不是文案，是真正说话的内容）；如果全程没有人说话（纯字幕/纯背景音乐），返回空字符串
+2. hasSpeech：这支视频有没有真人口播/说话
+3. language：视频里主要使用的语言（例如 "zh"、"en"、"ms"、"zh+en" 混杂等）
+4. hookType：从这些选项里选最贴切的一个：${HOOK_TYPES_DB.join(", ")}
+5. hookText：开场钩子的原句或概括（中文，一句话）
+6. structure：整支视频的叙事结构，拆成 3-5 个阶段，每个阶段一句话描述（例如"亮结果"、"家长口述转折"、"老师出镜背书"、"CTA 引导私讯"）
+7. ctaText：结尾的行动号召文案
+8. whyScored：结合上面机构背景，用 2-3 句话说明这支视频为什么值得英雄教育参考、能不能用、为什么打这个分
+9. relevanceScore：1-10 分，评估这支视频的结构/钩子对英雄教育的招生内容有多大参考价值`
+    : `你是一个短视频营销分析师，帮马来西亚的教育机构「英雄教育」拆解竞品/参考短视频，判断它值不值得模仿。
+
+机构背景：${settings?.niche_description ?? "补习教育机构"}
+卖点：${settings?.what_i_sell ?? ""}
+
+要分析的视频信息（注意：视频本体拿不到，只能看文案，无法判断真实口播内容）：
 账号：@${input.account}
-文案/转写内容：
+文案：
 ${input.text}
 
 数据：播放 ${input.plays}，点赞 ${input.likes}，评论 ${input.comments}
 
 请用中文输出结构化拆解：
-1. hookType：从这些选项里选最贴切的一个：${HOOK_TYPES_DB.join(", ")}
-2. hookText：开场钩子的原句或概括（中文，一句话）
-3. structure：整支视频的叙事结构，拆成 3-5 个阶段，每个阶段一句话描述（例如"亮结果"、"家长口述转折"、"老师出镜背书"、"CTA 引导私讯"）
-4. ctaText：结尾的行动号召文案
-5. whyScored：结合上面机构背景，用 2-3 句话说明这支视频为什么值得英雄教育参考、能不能用、为什么打这个分
-6. relevanceScore：1-10 分，评估这支视频的结构/钩子对英雄教育的招生内容有多大参考价值`;
+1. transcript：拿不到视频本体，直接返回空字符串
+2. hasSpeech：拿不到视频本体，无法判断，返回 false
+3. language：根据文案文字判断主要语言（例如 "zh"、"en"、"ms"）
+4. hookType：从这些选项里选最贴切的一个：${HOOK_TYPES_DB.join(", ")}
+5. hookText：开场钩子的原句或概括（中文，一句话）
+6. structure：整支视频的叙事结构，拆成 3-5 个阶段，每个阶段一句话描述（例如"亮结果"、"家长口述转折"、"老师出镜背书"、"CTA 引导私讯"）
+7. ctaText：结尾的行动号召文案
+8. whyScored：结合上面机构背景，用 2-3 句话说明这支视频为什么值得英雄教育参考、能不能用、为什么打这个分
+9. relevanceScore：1-10 分，评估这支视频的结构/钩子对英雄教育的招生内容有多大参考价值`;
 
   const schema = {
     type: "object",
     properties: {
+      transcript: { type: "string" },
+      hasSpeech: { type: "boolean" },
+      language: { type: "string" },
       hookType: { type: "string", enum: HOOK_TYPES_DB },
       hookText: { type: "string" },
       structure: { type: "array", items: { type: "string" } },
@@ -62,10 +114,10 @@ ${input.text}
       whyScored: { type: "string" },
       relevanceScore: { type: "integer" },
     },
-    required: ["hookType", "hookText", "structure", "ctaText", "whyScored", "relevanceScore"],
+    required: ["transcript", "hasSpeech", "language", "hookType", "hookText", "structure", "ctaText", "whyScored", "relevanceScore"],
   };
 
-  const analysis = await generateJSON<AnalysisResult>({ prompt, schema, temperature: 0.6 });
+  const analysis = await generateJSON<AnalysisResult>({ prompt, schema, temperature: 0.6, video: video ?? undefined });
 
   const { data: reel, error: reelErr } = await supabaseAdmin
     .from("reels")
@@ -94,8 +146,9 @@ ${input.text}
     .from("reel_analysis")
     .insert({
       reel_id: reel.id,
-      transcript: input.text,
-      has_speech: true,
+      transcript: analysis.data.transcript || input.text,
+      has_speech: analysis.data.hasSpeech,
+      language: analysis.data.language || null,
       relevance_score: Math.max(1, Math.min(10, Math.round(analysis.data.relevanceScore))),
       hook_type: analysis.data.hookType,
       hook_text: analysis.data.hookText,

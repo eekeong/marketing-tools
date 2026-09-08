@@ -1,171 +1,96 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { scrapeReelsByUrls, scrapeReelsByKeywords, ApifyReelItem } from "@/lib/apify";
-import { analyzeAndStoreReel } from "@/lib/reelAnalysis";
+import { startActorRun, buildRadarInput, buildDiscoverInput } from "@/lib/apify";
 import { ReelSource } from "@/lib/reelRadarTypes";
 
+export const maxDuration = 60;
+
+// Starts a scan and returns immediately with a runId — the actual scrape (which can
+// take much longer than a single request should block on) runs on Apify's side, and
+// analysis happens incrementally via /scan/[runId]/continue. See status/route.ts for
+// how the client drives the rest of the pipeline.
 export async function POST(req: NextRequest) {
   const body = await req.json();
   const type: ReelSource = ["radar", "discover", "mine"].includes(body.type) ? body.type : "radar";
 
+  const { data: existingRunning } = await supabaseAdmin
+    .from("scan_runs")
+    .select("id")
+    .eq("type", type)
+    .eq("status", "running")
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (existingRunning) {
+    return NextResponse.json({ runId: existingRunning.id, resumed: true });
+  }
+
   const { data: settings } = await supabaseAdmin.from("settings").select("*").eq("id", 1).single();
   const resultsLimit = settings?.reels_per_account || 10;
 
-  let items: ApifyReelItem[] = [];
+  let input: Record<string, unknown>;
   let scannedUsernames: string[] = [];
 
-  try {
-    if (type === "radar") {
-      const { data: competitors } = await supabaseAdmin.from("competitors").select("*").eq("status", "active");
-      if (!competitors || competitors.length === 0) {
-        return NextResponse.json({ error: "还没有任何竞品账号，先在设置里添加。" }, { status: 400 });
-      }
-      scannedUsernames = competitors.map((c) => c.ig_username);
-      const directUrls = scannedUsernames.map((u) => `https://www.instagram.com/${u}/`);
-      items = await scrapeReelsByUrls(directUrls, resultsLimit);
-    } else if (type === "discover") {
-      const { data: keywords } = await supabaseAdmin.from("keywords").select("*").eq("status", "active");
-      if (!keywords || keywords.length === 0) {
-        return NextResponse.json({ error: "还没有任何探索关键词，先在设置里添加。" }, { status: 400 });
-      }
-      items = await scrapeReelsByKeywords(
-        keywords.map((k) => k.term),
-        resultsLimit,
-      );
-    } else {
-      if (!settings?.my_ig_username) {
-        return NextResponse.json({ error: "还没有设置你自己的 IG 账号，先在设置里填写。" }, { status: 400 });
-      }
-      scannedUsernames = [settings.my_ig_username];
-      items = await scrapeReelsByUrls([`https://www.instagram.com/${settings.my_ig_username}/`], resultsLimit);
+  if (type === "radar") {
+    const { data: competitors } = await supabaseAdmin.from("competitors").select("*").eq("status", "active");
+    if (!competitors || competitors.length === 0) {
+      return NextResponse.json({ error: "还没有任何竞品账号，先在设置里添加。" }, { status: 400 });
     }
-  } catch (err) {
-    return NextResponse.json({ error: `抓取失败: ${(err as Error).message}` }, { status: 502 });
+    scannedUsernames = competitors.map((c) => c.ig_username);
+    input = buildRadarInput(scannedUsernames, resultsLimit);
+  } else if (type === "discover") {
+    const { data: keywords } = await supabaseAdmin.from("keywords").select("*").eq("status", "active");
+    if (!keywords || keywords.length === 0) {
+      return NextResponse.json({ error: "还没有任何探索关键词，先在设置里添加。" }, { status: 400 });
+    }
+    input = buildDiscoverInput(keywords.map((k) => k.term));
+  } else {
+    if (!settings?.my_ig_username) {
+      return NextResponse.json({ error: "还没有设置你自己的 IG 账号，先在设置里填写。" }, { status: 400 });
+    }
+    scannedUsernames = [settings.my_ig_username];
+    input = buildRadarInput(scannedUsernames, resultsLimit);
   }
 
-  const { data: run } = await supabaseAdmin
+  let handle;
+  try {
+    handle = await startActorRun(input);
+  } catch (err) {
+    return NextResponse.json({ error: `启动抓取失败: ${(err as Error).message}` }, { status: 502 });
+  }
+
+  const { data: run, error } = await supabaseAdmin
     .from("scan_runs")
-    .insert({ type, status: "running", phase: "analyze", total: items.length })
+    .insert({
+      type,
+      status: "running",
+      phase: "collecting",
+      apify_run_id: handle.runId,
+      apify_dataset_id: handle.datasetId,
+    })
     .select()
     .single();
-
-  let done = 0;
-  let failed = 0;
-  let costUsd = 0;
-
-  for (const item of items) {
-    if (item.error || !item.shortCode) {
-      failed += 1;
-      if (run) {
-        await supabaseAdmin.from("scan_items").insert({
-          run_id: run.id,
-          owner_username: item.username ?? item.ownerUsername ?? null,
-          stage: "fetch",
-          status: "failed",
-          error_message: item.errorDescription ?? item.error ?? "no data returned",
-          human_message: `@${item.username ?? item.ownerUsername ?? "?"} 抓取失败：${item.errorDescription ?? item.error ?? "没有返回数据"}`,
-        });
-      }
-      continue;
-    }
-    const shortcode = item.shortCode;
-    const ownerUsername = item.ownerUsername ?? "unknown";
-
-    const { data: existing } = await supabaseAdmin.from("reels").select("id").eq("shortcode", shortcode).maybeSingle();
-    if (existing) {
-      if (run) {
-        await supabaseAdmin.from("scan_items").insert({
-          run_id: run.id,
-          shortcode,
-          owner_username: ownerUsername,
-          stage: "analyze",
-          status: "done",
-          human_message: `@${ownerUsername} 的这条已经收录过，跳过`,
-        });
-      }
-      continue;
-    }
-
-    const { data: blocked } = await supabaseAdmin.from("blocklist").select("shortcode").eq("shortcode", shortcode).maybeSingle();
-    if (blocked) continue;
-
-    const caption = (item.caption ?? "").trim();
-    if (!caption) {
-      failed += 1;
-      if (run) {
-        await supabaseAdmin.from("scan_items").insert({
-          run_id: run.id,
-          shortcode,
-          owner_username: ownerUsername,
-          stage: "analyze",
-          status: "failed",
-          error_message: "empty caption",
-          human_message: `@${ownerUsername} 的这条视频没有文案，AI 无法分析，跳过`,
-        });
-      }
-      continue;
-    }
-
-    const discoveredVia =
-      type === "discover" && item.inputUrl ? decodeURIComponent(item.inputUrl.match(/\/tags\/([^/]+)/)?.[1] ?? "") || null : null;
-
-    try {
-      const result = await analyzeAndStoreReel({
-        shortcode,
-        url: item.url,
-        account: ownerUsername,
-        ownerFullName: item.ownerFullName,
-        text: caption,
-        plays: item.videoPlayCount ?? item.videoViewCount ?? 0,
-        likes: item.likesCount ?? 0,
-        comments: item.commentsCount ?? 0,
-        durationSec: item.videoDuration ?? null,
-        postedAt: item.timestamp ?? null,
-        source: type,
-        discoveredVia,
-        thumbnailUrl: item.displayUrl ?? null,
-        videoUrl: item.videoUrl ?? null,
-        raw: item,
-      });
-      done += 1;
-      costUsd += result.costUsd;
-      if (run) {
-        await supabaseAdmin.from("scan_items").insert({
-          run_id: run.id,
-          shortcode,
-          owner_username: ownerUsername,
-          stage: "analyze",
-          status: "done",
-          reel_id: result.reel.id,
-          human_message: `分析了 @${ownerUsername} 的一条 Reel，打了 ${result.analysis.relevance_score} 分`,
-        });
-      }
-    } catch (err) {
-      failed += 1;
-      if (run) {
-        await supabaseAdmin.from("scan_items").insert({
-          run_id: run.id,
-          shortcode,
-          owner_username: ownerUsername,
-          stage: "analyze",
-          status: "failed",
-          error_message: (err as Error).message,
-          human_message: `@${ownerUsername} 的这条分析失败：${(err as Error).message}`,
-        });
-      }
-    }
+  if (error || !run) {
+    return NextResponse.json({ error: error?.message ?? "failed to create scan run" }, { status: 500 });
   }
 
-  if (scannedUsernames.length > 0 && type === "radar") {
+  if (type === "radar") {
     await supabaseAdmin.from("competitors").update({ last_scanned_at: new Date().toISOString() }).in("ig_username", scannedUsernames);
   }
 
-  if (run) {
-    await supabaseAdmin
-      .from("scan_runs")
-      .update({ status: "done", done, failed, cost_usd: costUsd, finished_at: new Date().toISOString() })
-      .eq("id", run.id);
-  }
+  return NextResponse.json({ runId: run.id });
+}
 
-  return NextResponse.json({ total: items.length, done, failed });
+// Marks a running scan cancelled — the continue loop checks this before claiming
+// each next item, so an in-flight item finishes but no further ones start.
+export async function PATCH(req: NextRequest) {
+  const body = await req.json();
+  const runId = String(body.runId ?? "");
+  if (!runId) return NextResponse.json({ error: "runId is required" }, { status: 400 });
+  const { error } = await supabaseAdmin
+    .from("scan_runs")
+    .update({ status: "cancelled", finished_at: new Date().toISOString() })
+    .eq("id", runId);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ ok: true });
 }

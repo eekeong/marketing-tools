@@ -31,14 +31,23 @@ export async function generateJSON<T>({
   prompt,
   schema,
   temperature = 0.8,
+  video,
 }: {
   prompt: string;
   schema: Record<string, unknown>;
   temperature?: number;
+  // Optional inline video (base64 data + mime type) so the same call can watch/listen
+  // to the reel instead of only reading its caption. Kept inline (not the Files API)
+  // since reels are short — well under the ~100MB inline request limit.
+  video?: { base64: string; mimeType: string };
 }): Promise<GenerateJSONResult<T>> {
   const apiKey = process.env.GEMINI_API_KEY;
   const model = process.env.GEMINI_MODEL || "gemini-3.6-flash";
   if (!apiKey) throw new Error("GEMINI_API_KEY is not set");
+
+  const parts: Record<string, unknown>[] = video
+    ? [{ inline_data: { mime_type: video.mimeType, data: video.base64 } }, { text: prompt }]
+    : [{ text: prompt }];
 
   let lastError = "";
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -49,7 +58,7 @@ export async function generateJSON<T>({
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
+        contents: [{ parts }],
         generationConfig: {
           temperature,
           responseMimeType: "application/json",

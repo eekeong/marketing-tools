@@ -5,6 +5,8 @@ import StatCard from "@/components/StatCard";
 import { useLanguage } from "@/lib/i18n";
 import AddReelModal from "./AddReelModal";
 import ReelThumb from "./ReelThumb";
+import ScanProgressBar from "./ScanProgressBar";
+import { useScan } from "./useScan";
 
 interface Hit {
   id: string;
@@ -34,7 +36,6 @@ export default function AccountTab() {
   const [loading, setLoading] = useState(true);
   const [diagnosing, setDiagnosing] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
-  const [scanning, setScanning] = useState(false);
 
   const load = async () => {
     const [accRes, patternsRes] = await Promise.all([
@@ -53,24 +54,7 @@ export default function AccountTab() {
     load();
   }, []);
 
-  const handleScan = async () => {
-    setScanning(true);
-    try {
-      const res = await fetch("/api/reel-radar/scan", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "mine" }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Failed");
-      alert(t("reelradar.scanDone", { done: String(json.done), failed: String(json.failed) }));
-      load();
-    } catch (err) {
-      alert((err as Error).message);
-    } finally {
-      setScanning(false);
-    }
-  };
+  const { progress, error: scanError, start: startScan, cancel: cancelScan, scanning } = useScan("mine", load);
 
   const handleDiagnose = async () => {
     setDiagnosing(true);
@@ -103,7 +87,7 @@ export default function AccountTab() {
             {t("account.rescan")}
           </button>
           <button
-            onClick={handleScan}
+            onClick={startScan}
             disabled={scanning}
             className="rounded-xl brand-gradient text-white text-sm font-medium px-4 py-2.5 shadow-sm hover:opacity-90 transition disabled:opacity-60"
           >
@@ -111,6 +95,9 @@ export default function AccountTab() {
           </button>
         </div>
       </div>
+
+      {scanning && <ScanProgressBar progress={progress} onCancel={cancelScan} />}
+      {scanError && <p className="text-xs text-red-500 mb-4">{scanError}</p>}
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
         <StatCard label={t("account.statCollected")} value={stats.collected} />

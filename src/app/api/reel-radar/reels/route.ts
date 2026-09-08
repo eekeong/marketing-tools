@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { colorForHandle, formatCount, hookTypeFromDb, ReelSource } from "@/lib/reelRadarTypes";
 
-const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
+const FORTY_EIGHT_HOURS_MS = 48 * 60 * 60 * 1000;
+const VIRAL_MULTIPLE_THRESHOLD = 1.5;
 
 export async function GET(req: NextRequest) {
   const source = (req.nextUrl.searchParams.get("source") ?? "radar") as ReelSource;
@@ -33,7 +34,8 @@ export async function GET(req: NextRequest) {
 
     const ownerStats = avgByOwner.get(r.owner_username);
     const avgOthers = ownerStats && ownerStats.count > 1 ? (ownerStats.sum - r.play_count) / (ownerStats.count - 1) : 0;
-    const viralMultiple = avgOthers > 0 ? Math.round((r.play_count / avgOthers) * 10) / 10 : null;
+    const rawMultiple = avgOthers > 0 ? Math.round((r.play_count / avgOthers) * 10) / 10 : 0;
+    const viralMultiple = rawMultiple >= VIRAL_MULTIPLE_THRESHOLD ? rawMultiple : null;
 
     return {
       id: r.id,
@@ -44,13 +46,15 @@ export async function GET(req: NextRequest) {
       likes: formatCount(r.like_count),
       score: analysis?.relevance_score ?? 0,
       viralMultiple,
-      isNew: Date.now() - new Date(r.first_seen_at).getTime() < THREE_DAYS_MS,
+      isNew: Date.now() - new Date(r.first_seen_at).getTime() < FORTY_EIGHT_HOURS_MS,
       color: colorForHandle(r.owner_username),
       whyScored: analysis?.why_scored ?? "",
       hook: analysis?.hook_text ?? "",
       structure: (analysis?.structure ?? []).join(" → "),
       cta: analysis?.cta_text ?? "",
       transcript: analysis?.transcript ?? r.caption ?? "",
+      hasSpeech: analysis?.has_speech ?? true,
+      language: analysis?.language ?? null,
       caption: r.caption ?? "",
       rewrite: latestOf("rewrite_structure"),
       remix: latestOf("copy_script"),

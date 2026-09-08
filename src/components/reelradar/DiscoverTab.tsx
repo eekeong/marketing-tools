@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useLanguage } from "@/lib/i18n";
 import AddReelModal from "./AddReelModal";
 import ReelThumb from "./ReelThumb";
+import ScanProgressBar from "./ScanProgressBar";
+import { useScan } from "./useScan";
 
 interface Reel {
   id: string;
@@ -14,6 +16,7 @@ interface Reel {
   color: string;
   discoveredVia: string | null;
   caption: string;
+  language: string | null;
   thumbnailUrl: string | null;
   igUrl: string;
 }
@@ -29,7 +32,9 @@ export default function DiscoverTab() {
   const [reels, setReels] = useState<Reel[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
-  const [scanning, setScanning] = useState(false);
+  const [languageFilter, setLanguageFilter] = useState<string>("all");
+  const [addedHandles, setAddedHandles] = useState<Set<string>>(new Set());
+  const [showLowScore, setShowLowScore] = useState(false);
 
   const load = async () => {
     const [kwRes, reelsRes] = await Promise.all([
@@ -45,27 +50,26 @@ export default function DiscoverTab() {
     load();
   }, []);
 
-  const handleScan = async () => {
-    setScanning(true);
-    try {
-      const res = await fetch("/api/reel-radar/scan", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "discover" }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Failed");
-      alert(t("reelradar.scanDone", { done: String(json.done), failed: String(json.failed) }));
-      load();
-    } catch (err) {
-      alert((err as Error).message);
-    } finally {
-      setScanning(false);
-    }
+  const { progress, error: scanError, start: startScan, cancel: cancelScan, scanning } = useScan("discover", load);
+
+  const languages = Array.from(new Set(reels.map((r) => r.language).filter((l): l is string => !!l)));
+  const filteredReels = reels.filter(
+    (r) => (languageFilter === "all" || r.language === languageFilter) && (showLowScore || r.score > 3),
+  );
+
+  const handleAddToList = async (handle: string) => {
+    // A duplicate (already-tracked) handle 500s on the unique constraint — that
+    // still means "it's on the list", so mark it added either way.
+    await fetch("/api/reel-radar/competitors", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ handle: handle.replace(/^@/, "") }),
+    }).catch(() => {});
+    setAddedHandles((prev) => new Set(prev).add(handle));
   };
 
   const byAccount = new Map<string, { appearances: number; scoreSum: number }>();
-  for (const r of reels) {
+  for (const r of filteredReels) {
     const cur = byAccount.get(r.account) ?? { appearances: 0, scoreSum: 0 };
     cur.appearances += 1;
     cur.scoreSum += r.score;
@@ -90,7 +94,7 @@ export default function DiscoverTab() {
             {t("discover.startButton")}
           </button>
           <button
-            onClick={handleScan}
+            onClick={startScan}
             disabled={scanning}
             className="rounded-xl brand-gradient text-white text-sm font-medium px-4 py-2.5 shadow-sm hover:opacity-90 transition disabled:opacity-60"
           >
@@ -99,20 +103,39 @@ export default function DiscoverTab() {
         </div>
       </div>
 
+      {scanning && <ScanProgressBar progress={progress} onCancel={cancelScan} />}
+      {scanError && <p className="text-xs text-red-500 mb-4">{scanError}</p>}
+
       <div className="rounded-xl bg-background border border-border p-3.5 text-xs text-muted leading-relaxed mb-2">
         {t("discover.whyNoHashtag")}
       </div>
       <p className="text-[11px] text-muted mb-6">{t("discover.frequencyNote")}</p>
 
-      <div className="mb-6">
-        <p className="text-xs font-medium text-muted uppercase tracking-wide mb-2">{t("setup.keywordsTitle")}</p>
-        <div className="flex flex-wrap gap-1.5">
-          {keywords.map((k) => (
-            <span key={k.id} className="rounded-full bg-background border border-border px-2.5 py-1 text-xs">
-              {k.term}
-            </span>
-          ))}
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-medium text-muted uppercase tracking-wide mb-2">{t("setup.keywordsTitle")}</p>
+          <div className="flex flex-wrap gap-1.5">
+            {keywords.map((k) => (
+              <span key={k.id} className="rounded-full bg-background border border-border px-2.5 py-1 text-xs">
+                {k.term}
+              </span>
+            ))}
+          </div>
         </div>
+        {languages.length > 0 && (
+          <select
+            value={languageFilter}
+            onChange={(e) => setLanguageFilter(e.target.value)}
+            className="rounded-full border border-border px-3 py-1.5 text-xs font-medium text-muted bg-surface focus:outline-none shrink-0"
+          >
+            <option value="all">{t("reelradar.allLanguages")}</option>
+            {languages.map((l) => (
+              <option key={l} value={l}>
+                {l}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
       {loading ? (
@@ -133,15 +156,30 @@ export default function DiscoverTab() {
                       {acc.appearances} {t("discover.appearances")} · {t("discover.avgScore")} {acc.avgScore}/10
                     </p>
                   </div>
+                  <button
+                    onClick={() => handleAddToList(acc.handle)}
+                    disabled={addedHandles.has(acc.handle)}
+                    className="shrink-0 rounded-lg border border-border text-xs font-medium px-3 py-1.5 hover:bg-background transition disabled:opacity-50"
+                  >
+                    {addedHandles.has(acc.handle) ? t("discover.added") : t("discover.addToList")}
+                  </button>
                 </div>
               ))}
             </div>
           </div>
 
           <div>
-            <p className="text-sm font-semibold mb-3">{t("discover.foundReels")}</p>
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-sm font-semibold">{t("discover.foundReels")}</p>
+              <div className="flex items-center gap-2">
+                <p className="text-[11px] text-muted">{t("reelradar.lowScoreHidden")}</p>
+                <button onClick={() => setShowLowScore((v) => !v)} className="text-[11px] font-medium text-brand-pink hover:opacity-80 transition">
+                  {showLowScore ? t("reelradar.hideLowScoreAgain") : t("reelradar.showLowScore")}
+                </button>
+              </div>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {reels.map((r) => (
+              {filteredReels.map((r) => (
                 <div key={r.id} className="rounded-2xl border border-border bg-surface overflow-hidden">
                   <ReelThumb thumbnailUrl={r.thumbnailUrl} igUrl={r.igUrl} color={r.color} className="h-28 w-full text-2xl" />
                   <div className="p-3">
