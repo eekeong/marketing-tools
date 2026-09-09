@@ -2,11 +2,12 @@
 
 import { useState } from "react";
 import { useConfig, EventStep } from "@/lib/config";
+import { useSocialAccounts } from "@/lib/accountsStore";
 import { useLanguage } from "@/lib/i18n";
 import { Platform, PostStatus, AssetStatus } from "@/lib/types";
 import PageHeader from "@/components/PageHeader";
 
-type Tab = "images" | "icons" | "platforms" | "statuses" | "team" | "salesReps" | "assetTemplates" | "eventTemplates";
+type Tab = "images" | "icons" | "platforms" | "statuses" | "team" | "salesReps" | "accounts" | "assetTemplates" | "eventTemplates";
 
 export default function CmsPage() {
   const { t } = useLanguage();
@@ -19,6 +20,7 @@ export default function CmsPage() {
     { key: "statuses", label: t("cms.tab.statuses") },
     { key: "team", label: t("cms.tab.team") },
     { key: "salesReps", label: t("cms.tab.salesReps") },
+    { key: "accounts", label: t("cms.tab.accounts") },
     { key: "assetTemplates", label: t("cms.tab.assetTemplates") },
     { key: "eventTemplates", label: t("cms.tab.eventTemplates") },
   ];
@@ -47,6 +49,7 @@ export default function CmsPage() {
       {tab === "statuses" && <StatusesTab />}
       {tab === "team" && <TeamTab />}
       {tab === "salesReps" && <SalesRepsTab />}
+      {tab === "accounts" && <AccountsTab />}
       {tab === "assetTemplates" && <AssetTemplatesTab />}
       {tab === "eventTemplates" && <EventTemplatesTab />}
     </div>
@@ -408,6 +411,82 @@ function SalesRepsTab() {
             addSalesRep({ name: name.trim(), phone: phone.trim() });
             setName("");
             setPhone("");
+          }}
+          disabled={!name.trim()}
+          className="rounded-lg brand-gradient text-white text-sm font-medium px-4 py-1.5 disabled:opacity-40"
+        >
+          {t("action.add")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AccountsTab() {
+  const { accounts, addAccount, updateAccount, removeAccount } = useSocialAccounts();
+  const { platforms } = useConfig();
+  const { lang, t } = useLanguage();
+  const [name, setName] = useState("");
+  const [platform, setPlatform] = useState("");
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted">{t("cms.accounts.desc")}</p>
+      <div className="rounded-2xl border border-border bg-surface divide-y divide-border">
+        {accounts.length === 0 ? (
+          <p className="text-sm text-muted italic p-3.5">{t("cms.accounts.empty")}</p>
+        ) : (
+          accounts.map((a) => (
+            <div key={a.id} className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2.5 sm:items-center p-3.5">
+              <input
+                value={a.displayName}
+                onChange={(e) => updateAccount(a.id, { displayName: e.target.value })}
+                className="w-full min-w-0 rounded-lg border border-border bg-surface text-foreground px-2.5 py-1.5 text-sm"
+              />
+              <select
+                value={a.platform ?? ""}
+                onChange={(e) => updateAccount(a.id, { platform: (e.target.value || null) as Platform | null })}
+                className="w-full min-w-0 rounded-lg border border-border bg-surface text-foreground px-2.5 py-1.5 text-sm"
+              >
+                <option value="">{t("cms.accounts.platformNone")}</option>
+                {(Object.keys(platforms) as Platform[]).map((pf) => (
+                  <option key={pf} value={pf}>
+                    {platforms[pf][lang]}
+                  </option>
+                ))}
+              </select>
+              <button onClick={() => removeAccount(a.id)} className="text-xs font-medium text-muted hover:text-red-500">
+                {t("action.delete")}
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2.5 sm:items-center">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder={t("cms.accounts.nameLabel")}
+          className="w-full min-w-0 rounded-lg border border-border bg-surface text-foreground px-2.5 py-1.5 text-sm"
+        />
+        <select
+          value={platform}
+          onChange={(e) => setPlatform(e.target.value)}
+          className="w-full min-w-0 rounded-lg border border-border bg-surface text-foreground px-2.5 py-1.5 text-sm"
+        >
+          <option value="">{t("cms.accounts.platformLabel")}</option>
+          {(Object.keys(platforms) as Platform[]).map((pf) => (
+            <option key={pf} value={pf}>
+              {platforms[pf][lang]}
+            </option>
+          ))}
+        </select>
+        <button
+          onClick={() => {
+            if (!name.trim()) return;
+            addAccount(name.trim(), (platform || null) as Platform | null);
+            setName("");
+            setPlatform("");
           }}
           disabled={!name.trim()}
           className="rounded-lg brand-gradient text-white text-sm font-medium px-4 py-1.5 disabled:opacity-40"

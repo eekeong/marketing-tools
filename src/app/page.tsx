@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import MonthCalendar from "@/components/calendar/MonthCalendar";
+import ListView from "@/components/calendar/ListView";
 import PostDetailPanel from "@/components/calendar/PostDetailPanel";
 import NewPostPanel from "@/components/calendar/NewPostPanel";
 import Pill from "@/components/Pill";
@@ -27,13 +28,15 @@ export default function CalendarPage() {
 function CalendarPageInner() {
   const { platforms, statuses, salesReps } = useConfig();
   const { lang, t } = useLanguage();
-  const { posts, addPost, updatePostStatus, updatePostPerformance, setPostApproved, attachMedia } = usePosts();
+  const { posts, addPost, updatePost, removePosts, updatePostStatus, attachMedia } = usePosts();
   const searchParams = useSearchParams();
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
   const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
   const [newPostDate, setNewPostDate] = useState<string | null>(null);
+  const [editingPost, setEditingPost] = useState<Post | null>(null);
+  const [view, setView] = useState<"calendar" | "list">("calendar");
 
   const selectedPost = posts.find((p) => p.id === selectedPostId) ?? null;
 
@@ -89,17 +92,22 @@ function CalendarPageInner() {
     return { counts, unassigned };
   }, [monthPosts]);
 
-  const performanceSummary = useMemo(() => {
-    const published = monthPosts.filter((p) => p.status === "published" && p.performance);
-    const totalLeads = published.reduce((s, p) => s + (p.performance?.leads ?? 0), 0);
-    const totalConversions = published.reduce((s, p) => s + (p.performance?.conversions ?? 0), 0);
-    const top = [...published].sort((a, b) => (b.performance?.leads ?? 0) - (a.performance?.leads ?? 0))[0];
-    return { totalLeads, totalConversions, top, hasData: published.length > 0 };
-  }, [monthPosts]);
-
   const handleCreatePost = (post: Post) => {
     addPost(post);
     setNewPostDate(null);
+  };
+
+  const handleUpdatePost = (
+    postId: string,
+    patch: Partial<Pick<Post, "title" | "date" | "platforms" | "owner" | "salesRepId" | "notes" | "adCopy" | "accountId">>
+  ) => {
+    updatePost(postId, patch);
+    setEditingPost(null);
+  };
+
+  const handleDeletePost = (postId: string) => {
+    removePosts([postId]);
+    setSelectedPostId(null);
   };
 
   return (
@@ -145,6 +153,25 @@ function CalendarPageInner() {
 
         <div className="flex-1" />
 
+        <div className="flex items-center gap-1 rounded-xl border border-border bg-surface p-1">
+          <button
+            onClick={() => setView("calendar")}
+            className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+              view === "calendar" ? "brand-gradient text-white" : "text-muted hover:text-foreground"
+            }`}
+          >
+            {t("calendar.viewCalendar")}
+          </button>
+          <button
+            onClick={() => setView("list")}
+            className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+              view === "list" ? "brand-gradient text-white" : "text-muted hover:text-foreground"
+            }`}
+          >
+            {t("calendar.viewList")}
+          </button>
+        </div>
+
         {needsAssets > 0 && (
           <Pill
             label={`${needsAssets} ${t("calendar.assetsShortage")}`}
@@ -173,15 +200,19 @@ function CalendarPageInner() {
         </div>
       </div>
 
-      <MonthCalendar
-        year={year}
-        month={month}
-        posts={monthPosts}
-        onDayClick={(dateKey) => setNewPostDate(dateKey)}
-        onPostClick={(post) => setSelectedPostId(post.id)}
-      />
+      {view === "calendar" ? (
+        <MonthCalendar
+          year={year}
+          month={month}
+          posts={monthPosts}
+          onDayClick={(dateKey) => setNewPostDate(dateKey)}
+          onPostClick={(post) => setSelectedPostId(post.id)}
+        />
+      ) : (
+        <ListView posts={monthPosts} onPostClick={(post) => setSelectedPostId(post.id)} />
+      )}
 
-      <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="mt-6">
         <div className="rounded-2xl border border-border bg-surface p-4">
           <p className="text-xs font-medium text-muted uppercase tracking-wide mb-3">{t("calendar.workloadTitle")}</p>
           {monthPosts.length === 0 ? (
@@ -207,30 +238,6 @@ function CalendarPageInner() {
             </div>
           )}
         </div>
-
-        <div className="rounded-2xl border border-border bg-surface p-4">
-          <p className="text-xs font-medium text-muted uppercase tracking-wide mb-3">{t("calendar.overviewTitle")}</p>
-          {!performanceSummary.hasData ? (
-            <p className="text-sm text-muted italic">{t("calendar.noPerformanceData")}</p>
-          ) : (
-            <div className="space-y-2 text-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-muted">{t("calendar.totalLeads")}</span>
-                <span className="font-medium">{performanceSummary.totalLeads}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted">{t("calendar.totalConversions")}</span>
-                <span className="font-medium">{performanceSummary.totalConversions}</span>
-              </div>
-              {performanceSummary.top && (
-                <div className="flex items-center justify-between pt-2 border-t border-border">
-                  <span className="text-muted">{t("calendar.topPost")}</span>
-                  <span className="font-medium truncate max-w-[60%]">{performanceSummary.top.title}</span>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
       </div>
 
       {selectedPost && (
@@ -238,14 +245,26 @@ function CalendarPageInner() {
           post={selectedPost}
           onClose={() => setSelectedPostId(null)}
           onUpdateStatus={updatePostStatus}
-          onUpdatePerformance={updatePostPerformance}
-          onSetApproved={setPostApproved}
           onAttachMedia={attachMedia}
+          onEdit={(post) => {
+            setSelectedPostId(null);
+            setEditingPost(post);
+          }}
+          onDelete={handleDeletePost}
         />
       )}
 
       {newPostDate && (
         <NewPostPanel date={newPostDate} onClose={() => setNewPostDate(null)} onCreate={handleCreatePost} />
+      )}
+
+      {editingPost && (
+        <NewPostPanel
+          date={editingPost.date}
+          post={editingPost}
+          onClose={() => setEditingPost(null)}
+          onUpdate={handleUpdatePost}
+        />
       )}
     </div>
   );

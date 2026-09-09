@@ -6,6 +6,7 @@ import { LanguageProvider } from "@/lib/i18n";
 import { ThemeProvider } from "@/lib/theme";
 import { ConfigProvider } from "@/lib/config";
 import { PostsProvider } from "@/lib/postsStore";
+import { AccountsProvider } from "@/lib/accountsStore";
 import { MediaProvider } from "@/lib/mediaStore";
 
 const geistSans = Geist({
@@ -30,12 +31,14 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <ThemeProvider>
           <LanguageProvider>
             <ConfigProvider>
-              <PostsProvider>
-                <MediaProvider>
-                  <Sidebar />
-                  <main className="flex-1 min-w-0">{children}</main>
-                </MediaProvider>
-              </PostsProvider>
+              <AccountsProvider>
+                <PostsProvider>
+                  <MediaProvider>
+                    <Sidebar />
+                    <main className="flex-1 min-w-0">{children}</main>
+                  </MediaProvider>
+                </PostsProvider>
+              </AccountsProvider>
             </ConfigProvider>
           </LanguageProvider>
         </ThemeProvider>

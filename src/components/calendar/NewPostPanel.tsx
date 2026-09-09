@@ -3,91 +3,90 @@
 import { useState } from "react";
 import { AssetRequest, Platform, Post } from "@/lib/types";
 import { useConfig } from "@/lib/config";
+import { useSocialAccounts } from "@/lib/accountsStore";
 import { useLanguage } from "@/lib/i18n";
-
-function subtractDays(dateStr: string, days: number) {
-  const d = new Date(dateStr + "T00:00:00");
-  d.setDate(d.getDate() - days);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
 
 export default function NewPostPanel({
   date,
+  post,
   onClose,
   onCreate,
+  onUpdate,
 }: {
   date: string;
+  post?: Post;
   onClose: () => void;
-  onCreate: (post: Post) => void;
+  onCreate?: (post: Post) => void;
+  onUpdate?: (
+    postId: string,
+    patch: Partial<Pick<Post, "title" | "date" | "platforms" | "owner" | "salesRepId" | "notes" | "adCopy" | "accountId">>
+  ) => void;
 }) {
-  const { platforms, owners, assetTemplates, departments, salesReps } = useConfig();
+  const { platforms, owners, salesReps } = useConfig();
+  const { accounts } = useSocialAccounts();
   const { lang, t } = useLanguage();
   const allPlatforms = Object.keys(platforms) as Platform[];
+  const isEditing = !!post;
 
-  const [title, setTitle] = useState("");
-  const [selectedPlatforms, setSelectedPlatforms] = useState<Platform[]>([]);
-  const [owner, setOwner] = useState(owners[0]);
-  const [salesRepId, setSalesRepId] = useState("");
-  const [notes, setNotes] = useState("");
-  const [selectedTemplateIds, setSelectedTemplateIds] = useState<Set<string>>(new Set());
-  const [customAssets, setCustomAssets] = useState<{ name: string; department: string }[]>([]);
-  const [showCustomForm, setShowCustomForm] = useState(false);
-  const [customName, setCustomName] = useState("");
-  const [customDept, setCustomDept] = useState(departments[0] ?? "");
+  const [title, setTitle] = useState(post?.title ?? "");
+  const [postDate, setPostDate] = useState(post?.date ?? date);
+  const [accountId, setAccountId] = useState(post?.accountId ?? "");
+  const [selectedPlatforms, setSelectedPlatforms] = useState<Platform[]>(post?.platforms ?? []);
+  const [owner, setOwner] = useState(post?.owner ?? owners[0]);
+  const [salesRepId, setSalesRepId] = useState(post?.salesRepId ?? "");
+  const [notes, setNotes] = useState(post?.notes ?? "");
+  const [adCopy, setAdCopy] = useState(post?.adCopy ?? "");
+  const [assetLink, setAssetLink] = useState("");
 
   const togglePlatform = (pf: Platform) => {
     setSelectedPlatforms((prev) => (prev.includes(pf) ? prev.filter((p) => p !== pf) : [...prev, pf]));
   };
 
-  const toggleTemplate = (id: string) => {
-    setSelectedTemplateIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const addCustomAsset = () => {
-    if (!customName.trim()) return;
-    setCustomAssets((prev) => [...prev, { name: customName.trim(), department: customDept }]);
-    setCustomName("");
-    setShowCustomForm(false);
-  };
-
-  const canSubmit = title.trim().length > 0 && selectedPlatforms.length > 0;
+  const canSubmit = title.trim().length > 0 && selectedPlatforms.length > 0 && postDate.length > 0;
 
   const handleSubmit = () => {
     if (!canSubmit) return;
 
-    const templateAssets: AssetRequest[] = assetTemplates
-      .filter((tpl) => selectedTemplateIds.has(tpl.id))
-      .map((tpl) => ({
-        id: `a_${tpl.id}_${Date.now()}`,
-        name: tpl.name,
-        requestedFrom: tpl.department,
-        status: "pending",
-        dueDate: subtractDays(date, tpl.daysBefore),
-      }));
+    if (isEditing && post) {
+      onUpdate?.(post.id, {
+        title: title.trim(),
+        date: postDate,
+        platforms: selectedPlatforms,
+        owner,
+        salesRepId: salesRepId || undefined,
+        accountId: accountId || undefined,
+        notes: notes.trim() || undefined,
+        adCopy: adCopy.trim() || undefined,
+      });
+      return;
+    }
 
-    const customAssetRequests: AssetRequest[] = customAssets.map((a, idx) => ({
-      id: `a_custom_${Date.now()}_${idx}`,
-      name: a.name,
-      requestedFrom: a.department,
-      status: "pending",
-      dueDate: date,
-    }));
+    const assets: AssetRequest[] = assetLink.trim()
+      ? [
+          {
+            id: `a_link_${Date.now()}`,
+            name: "素材",
+            requestedFrom: "",
+            status: "provided",
+            dueDate: postDate,
+            mediaUrl: assetLink.trim(),
+          },
+        ]
+      : [];
 
-    onCreate({
+    onCreate?.({
       id: `p_${Date.now()}`,
       title: title.trim(),
-      date,
+      date: postDate,
       platforms: selectedPlatforms,
       status: "idea",
       owner,
       salesRepId: salesRepId || undefined,
+      accountId: accountId || undefined,
       notes: notes.trim() || undefined,
-      assets: [...templateAssets, ...customAssetRequests],
+      adCopy: adCopy.trim() || undefined,
+      assets,
+      platformContent: [],
     });
   };
 
@@ -99,8 +98,8 @@ export default function NewPostPanel({
           <button onClick={onClose} className="text-white/80 hover:text-white text-sm mb-3">
             {t("newpost.cancel")}
           </button>
-          <p className="text-xs text-white/80">{date}</p>
-          <h2 className="text-lg font-semibold mt-1">{t("newpost.title")}</h2>
+          <p className="text-xs text-white/80">{postDate}</p>
+          <h2 className="text-lg font-semibold mt-1">{isEditing ? t("newpost.editTitle") : t("newpost.title")}</h2>
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
@@ -112,6 +111,32 @@ export default function NewPostPanel({
               placeholder={t("newpost.titlePlaceholder")}
               className="w-full rounded-lg border border-border bg-surface text-foreground px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-pink/40"
             />
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-muted mb-1.5 block">{t("newpost.dateLabel")}</label>
+            <input
+              type="date"
+              value={postDate}
+              onChange={(e) => setPostDate(e.target.value)}
+              className="w-full rounded-lg border border-border bg-surface text-foreground px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-pink/40"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-muted mb-1.5 block">{t("newpost.accountLabel")}</label>
+            <select
+              value={accountId}
+              onChange={(e) => setAccountId(e.target.value)}
+              className="w-full rounded-lg border border-border bg-surface text-foreground px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-pink/40"
+            >
+              <option value="">{t("newpost.accountNone")}</option>
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.displayName}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div>
@@ -181,82 +206,27 @@ export default function NewPostPanel({
           </div>
 
           <div>
-            <label className="text-xs font-medium text-muted mb-1 block">{t("newpost.assetsLabel")}</label>
-            <p className="text-[11px] text-muted mb-2">{t("newpost.assetsHint")}</p>
-            <div className="space-y-1.5">
-              {assetTemplates.map((tpl) => {
-                const checked = selectedTemplateIds.has(tpl.id);
-                const due = subtractDays(date, tpl.daysBefore);
-                return (
-                  <label
-                    key={tpl.id}
-                    className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm cursor-pointer transition ${
-                      checked ? "border-brand-pink bg-brand-pink/5" : "border-border"
-                    }`}
-                  >
-                    <span className="flex items-center gap-2 min-w-0">
-                      <input type="checkbox" checked={checked} onChange={() => toggleTemplate(tpl.id)} />
-                      <span className="truncate">{tpl.name}</span>
-                    </span>
-                    <span className="text-[11px] text-muted shrink-0">
-                      {tpl.department} · {t("newpost.dueOn")} {due}
-                    </span>
-                  </label>
-                );
-              })}
-
-              {customAssets.map((a, idx) => (
-                <div key={idx} className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2 text-sm">
-                  <span className="truncate">{a.name}</span>
-                  <span className="flex items-center gap-2 shrink-0">
-                    <span className="text-[11px] text-muted">{a.department}</span>
-                    <button
-                      onClick={() => setCustomAssets((prev) => prev.filter((_, i) => i !== idx))}
-                      className="text-muted hover:text-red-500"
-                    >
-                      ×
-                    </button>
-                  </span>
-                </div>
-              ))}
-            </div>
-
-            {showCustomForm ? (
-              <div className="flex gap-2 mt-2">
-                <input
-                  value={customName}
-                  onChange={(e) => setCustomName(e.target.value)}
-                  placeholder={t("newpost.customAssetName")}
-                  className="flex-1 rounded-lg border border-border bg-surface text-foreground px-3 py-1.5 text-sm"
-                />
-                <select
-                  value={customDept}
-                  onChange={(e) => setCustomDept(e.target.value)}
-                  className="rounded-lg border border-border bg-surface text-foreground px-2 py-1.5 text-sm"
-                >
-                  {departments.map((d) => (
-                    <option key={d} value={d}>
-                      {d}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  onClick={addCustomAsset}
-                  disabled={!customName.trim()}
-                  className="rounded-lg brand-gradient text-white text-sm font-medium px-3 py-1.5 disabled:opacity-40 shrink-0"
-                >
-                  {t("newpost.customAssetAdd")}
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setShowCustomForm(true)}
-                className="text-xs font-medium text-brand-pink hover:underline mt-2"
-              >
-                {t("newpost.customAsset")}
-              </button>
-            )}
+            <label className="text-xs font-medium text-muted mb-1.5 block">{t("newpost.adCopyLabel")}</label>
+            <textarea
+              value={adCopy}
+              onChange={(e) => setAdCopy(e.target.value)}
+              rows={2}
+              placeholder={t("newpost.adCopyPlaceholder")}
+              className="w-full rounded-lg border border-border bg-surface text-foreground px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-pink/40"
+            />
           </div>
+
+          {!isEditing && (
+            <div>
+              <label className="text-xs font-medium text-muted mb-1.5 block">{t("newpost.assetLabel")}</label>
+              <input
+                value={assetLink}
+                onChange={(e) => setAssetLink(e.target.value)}
+                placeholder={t("newpost.assetPlaceholder")}
+                className="w-full rounded-lg border border-border bg-surface text-foreground px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-pink/40"
+              />
+            </div>
+          )}
         </div>
 
         <div className="p-5 border-t border-border">
@@ -265,7 +235,7 @@ export default function NewPostPanel({
             disabled={!canSubmit}
             className="w-full rounded-xl brand-gradient text-white text-sm font-medium py-2.5 disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            {t("newpost.submit")}
+            {isEditing ? t("newpost.save") : t("newpost.submit")}
           </button>
         </div>
       </div>
