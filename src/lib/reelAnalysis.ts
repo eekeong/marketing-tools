@@ -5,6 +5,7 @@ import { HOOK_TYPES_DB, DbHookType, ReelSource, StructureStep } from "@/lib/reel
 interface AnalysisResult {
   hookType: DbHookType;
   hookText: string;
+  topicTitle: string;
   structure: StructureStep[];
   ctaText: string;
   whyScored: string;
@@ -89,16 +90,17 @@ ${input.text}
 
   const structureSteps = `4. hookType：从这些选项里选最贴切的一个：${HOOK_TYPES_DB.join(", ")}
 5. hookText：开场钩子的原句或概括（中文，一句话）
-6. structure：整支视频的叙事结构，拆成 3-5 个阶段，每个阶段一个 {title, description}：title 是 3-5 字的阶段名（例如"痛点举例"、"家长口述转折"、"老师出镜背书"、"转化 CTA"），description 是 1-2 句解释这个阶段具体做了什么、为什么这样安排
-7. ctaText：结尾的行动号召文案`;
+6. topicTitle：12-18 字以内，一句话概括这支视频具体在讲什么内容/切入点（例如"5分钟历史技巧，快速拿A"、"家长最常犯的3个辅导错误"）——这是给人扫一眼缩略图就知道视频在讲什么的标题，不是钩子原句、不是评价，用视频原本的语言（口播/文案主要是什么语言就用什么语言）
+7. structure：整支视频的叙事结构，拆成 3-5 个阶段，每个阶段一个 {title, description}：title 是 3-5 字的阶段名（例如"痛点举例"、"家长口述转折"、"老师出镜背书"、"转化 CTA"），description 是 1-2 句解释这个阶段具体做了什么、为什么这样安排
+8. ctaText：结尾的行动号召文案`;
 
   const verdictSteps = isMine
-    ? `8. whyScored：用 2-3 句话点评这支自家视频拍得怎么样——好在哪里、问题在哪里、为什么打这个分（这是复盘自己的内容，不是在评估要不要模仿）
-9. angle：下次再拍同类内容时，具体可以怎么调整/优化这支视频的套路（给一个具体切入点，不是重复 whyScored）
-10. relevanceScore：1-10 分，评估这支视频的结构/钩子有多值得当成以后拍摄的参考模板`
-    : `8. whyScored：结合上面机构背景，用 2-3 句话说明这支视频为什么值得英雄教育参考、能不能用、为什么打这个分
-9. angle：一个具体的内容改造角度建议——可以怎么把这支视频的套路改成英雄教育自己的内容，给一个具体切入点（不是重复 whyScored，是更落地的"怎么抄"建议）
-10. relevanceScore：1-10 分，评估这支视频的结构/钩子对英雄教育的招生内容有多大参考价值`;
+    ? `9. whyScored：用 2-3 句话点评这支自家视频拍得怎么样——好在哪里、问题在哪里、为什么打这个分（这是复盘自己的内容，不是在评估要不要模仿）
+10. angle：下次再拍同类内容时，具体可以怎么调整/优化这支视频的套路（给一个具体切入点，不是重复 whyScored）
+11. relevanceScore：1-10 分，评估这支视频的结构/钩子有多值得当成以后拍摄的参考模板`
+    : `9. whyScored：结合上面机构背景，用 2-3 句话说明这支视频为什么值得英雄教育参考、能不能用、为什么打这个分
+10. angle：一个具体的内容改造角度建议——可以怎么把这支视频的套路改成英雄教育自己的内容，给一个具体切入点（不是重复 whyScored，是更落地的"怎么抄"建议）
+11. relevanceScore：1-10 分，评估这支视频的结构/钩子对英雄教育的招生内容有多大参考价值`;
 
   const prompt = `${role}
 
@@ -118,6 +120,7 @@ ${verdictSteps}`;
       language: { type: "string" },
       hookType: { type: "string", enum: HOOK_TYPES_DB },
       hookText: { type: "string" },
+      topicTitle: { type: "string" },
       structure: {
         type: "array",
         items: {
@@ -137,6 +140,7 @@ ${verdictSteps}`;
       "language",
       "hookType",
       "hookText",
+      "topicTitle",
       "structure",
       "ctaText",
       "whyScored",
@@ -180,6 +184,7 @@ ${verdictSteps}`;
       relevance_score: Math.max(1, Math.min(10, Math.round(analysis.data.relevanceScore))),
       hook_type: analysis.data.hookType,
       hook_text: analysis.data.hookText,
+      topic_title: analysis.data.topicTitle || null,
       structure: analysis.data.structure,
       cta_text: analysis.data.ctaText,
       why_scored: analysis.data.whyScored,

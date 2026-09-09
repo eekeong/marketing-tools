@@ -36,6 +36,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       score: analysis?.relevance_score ?? 0,
       hookType: hookTypeFromDb(analysis?.hook_type ?? null),
       hookText: analysis?.hook_text ?? "",
+      topicTitle: analysis?.topic_title ?? null,
       structure: analysis?.structure ?? [],
       ctaText: analysis?.cta_text ?? "",
       whyScored: analysis?.why_scored ?? "",

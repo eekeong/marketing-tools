@@ -27,6 +27,7 @@ interface Reel {
   hasSpeech: boolean;
   language: string | null;
   caption: string;
+  topicTitle: string | null;
   thumbnailUrl: string | null;
   videoUrl: string | null;
   igUrl: string;

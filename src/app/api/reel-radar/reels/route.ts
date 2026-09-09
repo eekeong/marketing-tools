@@ -51,6 +51,7 @@ export async function GET(req: NextRequest) {
       color: colorForHandle(r.owner_username),
       whyScored: analysis?.why_scored ?? "",
       hook: analysis?.hook_text ?? "",
+      topicTitle: analysis?.topic_title ?? null,
       structure: ((analysis?.structure ?? []) as Parameters<typeof formatStructureStep>[0][])
         .map((s) => formatStructureStep(s).title)
         .join(" → "),

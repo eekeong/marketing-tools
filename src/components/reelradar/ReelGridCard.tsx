@@ -17,6 +17,7 @@ interface GridReel {
   isNew: boolean;
   color: string;
   caption: string;
+  topicTitle: string | null;
   thumbnailUrl: string | null;
   videoUrl: string | null;
   igUrl: string;
@@ -96,6 +97,14 @@ export default function ReelGridCard({
                 className="absolute inset-0"
                 style={{ background: `linear-gradient(160deg, ${reel.color}, ${reel.color}88)` }}
               />
+            )}
+
+            {reel.topicTitle && (
+              <div className="absolute inset-x-0 top-0 z-[5] px-1.5 pt-7 pb-2.5 bg-gradient-to-b from-black/80 via-black/45 to-transparent">
+                <p className="text-white text-[10.5px] font-semibold leading-snug line-clamp-2 drop-shadow-sm">
+                  {reel.topicTitle}
+                </p>
+              </div>
             )}
 
             <div className="absolute top-1.5 right-1.5 z-10 rounded-full bg-black/55 backdrop-blur-sm px-2 py-1 text-white">
