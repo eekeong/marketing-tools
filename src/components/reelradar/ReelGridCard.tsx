@@ -99,14 +99,6 @@ export default function ReelGridCard({
               />
             )}
 
-            {reel.topicTitle && (
-              <div className="absolute inset-x-0 top-0 z-[5] px-1.5 pt-7 pb-2.5 bg-gradient-to-b from-black/80 via-black/45 to-transparent">
-                <p className="text-white text-[10.5px] font-semibold leading-snug line-clamp-2 drop-shadow-sm">
-                  {reel.topicTitle}
-                </p>
-              </div>
-            )}
-
             <div className="absolute top-1.5 right-1.5 z-10 rounded-full bg-black/55 backdrop-blur-sm px-2 py-1 text-white">
               <SignalMeter score={reel.score} />
             </div>
@@ -140,7 +132,10 @@ export default function ReelGridCard({
         <span className="brand-gradient-soft w-fit rounded-full text-brand-purple text-[9.5px] font-semibold px-2 py-0.5">
           {reel.hookType}
         </span>
-        {reel.caption && <p className="text-[11px] text-foreground/85 leading-snug line-clamp-2">{reel.caption}</p>}
+        {reel.topicTitle && (
+          <p className="text-[11.5px] font-bold text-foreground leading-snug line-clamp-2">{reel.topicTitle}</p>
+        )}
+        {reel.caption && <p className="text-[11px] text-foreground/70 leading-snug line-clamp-2">{reel.caption}</p>}
         <div className="mt-auto flex items-center justify-between pt-1">
           <p className="text-[10px] font-medium text-muted">
             ▶ {reel.plays} · ♥ {reel.likes}
