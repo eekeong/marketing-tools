@@ -6,6 +6,7 @@ import StatCard from "@/components/StatCard";
 import { useLanguage } from "@/lib/i18n";
 import { HOOK_TYPES, HookType } from "@/lib/reelRadarData";
 import { formatCount } from "@/lib/reelRadarTypes";
+import ReelGridCard from "./ReelGridCard";
 import ReelThumb from "./ReelThumb";
 import ScanProgressBar from "./ScanProgressBar";
 import SignalMeter from "./SignalMeter";
@@ -27,6 +28,7 @@ interface Reel {
   language: string | null;
   caption: string;
   thumbnailUrl: string | null;
+  videoUrl: string | null;
   igUrl: string;
 }
 
@@ -51,6 +53,7 @@ export default function RadarTab({
   const [accountCount, setAccountCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState<"newest" | "score" | "views">("score");
+  const [view, setView] = useState<"grid" | "list">("grid");
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [visibleCount, setVisibleCount] = useState(20);
@@ -213,6 +216,24 @@ export default function RadarTab({
             {opt.label}
           </button>
         ))}
+        <div className="flex gap-0.5 rounded-full border border-border bg-surface p-0.5">
+          <button
+            onClick={() => setView("grid")}
+            className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+              view === "grid" ? "brand-gradient text-white" : "text-muted"
+            }`}
+          >
+            {t("reelradar.viewGrid")}
+          </button>
+          <button
+            onClick={() => setView("list")}
+            className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+              view === "list" ? "brand-gradient text-white" : "text-muted"
+            }`}
+          >
+            {t("reelradar.viewList")}
+          </button>
+        </div>
         {languages.length > 0 && (
           <select
             value={languageFilter}
@@ -275,6 +296,19 @@ export default function RadarTab({
         <p className="text-sm text-muted">{t("reelradar.loading")}</p>
       ) : visible.length === 0 ? (
         <p className="text-sm text-muted">{t("reelradar.empty")}</p>
+      ) : view === "grid" ? (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+          {visible.map((reel) => (
+            <ReelGridCard
+              key={reel.id}
+              reel={reel}
+              selectMode={selectMode}
+              selected={selected.has(reel.id)}
+              onToggleSelect={() => toggleSelected(reel.id)}
+              onDelete={() => handleDeleteOne(reel.id)}
+            />
+          ))}
+        </div>
       ) : (
         <div className="space-y-3">
           {visible.map((reel) => (

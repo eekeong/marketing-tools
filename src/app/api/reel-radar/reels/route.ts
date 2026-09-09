@@ -63,6 +63,7 @@ export async function GET(req: NextRequest) {
       remix: latestOf("copy_script"),
       discoveredVia: r.discovered_via ?? null,
       thumbnailUrl: r.thumbnail_url ?? null,
+      videoUrl: r.video_url ?? null,
       igUrl: r.ig_url,
     };
   });
