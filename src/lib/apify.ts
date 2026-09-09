@@ -81,6 +81,27 @@ export async function getActorRunStatus(runId: string): Promise<{ status: ActorR
   return { status: json.data.status, datasetId: json.data.defaultDatasetId };
 }
 
+export interface ApifyUsage {
+  usedUsd: number;
+  limitUsd: number;
+  cycleEndsAt: string;
+}
+
+export async function getAccountUsage(): Promise<ApifyUsage> {
+  const { token } = credentials();
+  const res = await fetch(`https://api.apify.com/v2/users/me/limits?token=${token}`);
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Apify error ${res.status}: ${text.slice(0, 500)}`);
+  }
+  const json = await res.json();
+  return {
+    usedUsd: json.data.current.monthlyUsageUsd,
+    limitUsd: json.data.limits.maxMonthlyUsageUsd,
+    cycleEndsAt: json.data.monthlyUsageCycle.endAt,
+  };
+}
+
 export async function getDatasetItems<T>(datasetId: string): Promise<T[]> {
   const { token } = credentials();
   const res = await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&clean=true`);

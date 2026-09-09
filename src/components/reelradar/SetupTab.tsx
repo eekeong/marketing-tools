@@ -32,6 +32,8 @@ export default function SetupTab() {
 
   const [newHandle, setNewHandle] = useState("");
   const [newKeyword, setNewKeyword] = useState("");
+  const [apifyUsage, setApifyUsage] = useState<{ usedUsd: number; limitUsd: number; cycleEndsAt: string } | null>(null);
+  const [apifyUsageError, setApifyUsageError] = useState(false);
 
   const load = async () => {
     const [compRes, kwRes, settingsRes] = await Promise.all([
@@ -48,6 +50,13 @@ export default function SetupTab() {
 
   useEffect(() => {
     load();
+    fetch("/api/reel-radar/apify-usage")
+      .then((r) => r.json())
+      .then((json) => {
+        if (json.error) setApifyUsageError(true);
+        else setApifyUsage(json);
+      })
+      .catch(() => setApifyUsageError(true));
   }, []);
 
   const addCompetitor = async () => {
@@ -117,6 +126,38 @@ export default function SetupTab() {
       <div>
         <h2 className="text-lg font-semibold mb-1">{t("setup.title")}</h2>
         <p className="text-sm text-muted">{t("setup.subtitle")}</p>
+      </div>
+
+      <div>
+        <p className="text-sm font-semibold mb-1">{t("setup.apifyUsageTitle")}</p>
+        <p className="text-xs text-muted mb-3">{t("setup.apifyUsageDesc")}</p>
+        <div className="rounded-2xl border border-border bg-surface p-4">
+          {apifyUsageError ? (
+            <p className="text-sm text-red-500">{t("setup.apifyUsageError")}</p>
+          ) : !apifyUsage ? (
+            <p className="text-sm text-muted">{t("reelradar.loading")}</p>
+          ) : (
+            <>
+              <div className="flex items-baseline justify-between mb-2">
+                <span className="text-2xl font-semibold">
+                  ${Math.max(0, apifyUsage.limitUsd - apifyUsage.usedUsd).toFixed(2)}
+                </span>
+                <span className="text-xs text-muted">
+                  {t("setup.apifyUsageRemaining")} / ${apifyUsage.limitUsd.toFixed(0)}
+                </span>
+              </div>
+              <div className="h-2 rounded-full bg-background overflow-hidden mb-2">
+                <div
+                  className="h-full brand-gradient rounded-full transition-all"
+                  style={{ width: `${Math.min(100, (apifyUsage.usedUsd / apifyUsage.limitUsd) * 100)}%` }}
+                />
+              </div>
+              <p className="text-[11px] text-muted">
+                {t("setup.apifyUsageResetsOn")} {apifyUsage.cycleEndsAt.slice(0, 10)}
+              </p>
+            </>
+          )}
+        </div>
       </div>
 
       <div>

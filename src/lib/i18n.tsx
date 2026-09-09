@@ -282,6 +282,11 @@ const dict: Dict = {
   "reeldetail.angleLabel": { zh: "内容角度", en: "Angle" },
   "reeldetail.languageLabel": { zh: "语言", en: "Language" },
   "reeldetail.notFound": { zh: "找不到这条 Reel", en: "Reel not found" },
+  "setup.apifyUsageTitle": { zh: "Apify 用量", en: "Apify Usage" },
+  "setup.apifyUsageDesc": { zh: "抓取 Instagram 用的额度，每月重置。", en: "Credit used for scraping Instagram — resets monthly." },
+  "setup.apifyUsageRemaining": { zh: "本月剩余", en: "Remaining this month" },
+  "setup.apifyUsageResetsOn": { zh: "重置于", en: "Resets" },
+  "setup.apifyUsageError": { zh: "读取用量失败", en: "Couldn't load usage" },
   "reeldetail.videoUnavailable": { zh: "视频链接已过期，去 Instagram 看原片", en: "The video link has expired — view the original on Instagram" },
 
   "discover.title": { zh: "发现新的同行", en: "Discover New Creators" },
