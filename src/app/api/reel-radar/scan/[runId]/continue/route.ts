@@ -6,6 +6,28 @@ import { ApifyReelItem } from "@/lib/apify";
 
 export const maxDuration = 60;
 
+// Recomputed from scan_items each time instead of read-modify-write incrementing
+// scan_runs.done/failed — the after()-chained self-calls can overlap in flight,
+// and incrementing a value read at the top of the request loses updates under
+// that race (observed for real: a 377-item run showed done=185 despite all 377
+// actually completing). Counting current rows is race-free by construction.
+async function getRunProgress(runId: string): Promise<{ done: number; failed: number; costUsd: number }> {
+  const [{ count: done }, { count: failed }, { data: doneItems }] = await Promise.all([
+    supabaseAdmin.from("scan_items").select("id", { count: "exact", head: true }).eq("run_id", runId).eq("status", "done"),
+    supabaseAdmin.from("scan_items").select("id", { count: "exact", head: true }).eq("run_id", runId).eq("status", "failed"),
+    supabaseAdmin.from("scan_items").select("reel_id").eq("run_id", runId).eq("status", "done").not("reel_id", "is", null),
+  ]);
+
+  const reelIds = (doneItems ?? []).map((i) => i.reel_id as string);
+  let costUsd = 0;
+  if (reelIds.length > 0) {
+    const { data: costs } = await supabaseAdmin.from("reel_analysis").select("cost_usd").in("reel_id", reelIds);
+    costUsd = (costs ?? []).reduce((s, c) => s + Number(c.cost_usd ?? 0), 0);
+  }
+
+  return { done: done ?? 0, failed: failed ?? 0, costUsd };
+}
+
 // Processes exactly one queued scan_item per call — kept to one item so a call
 // comfortably fits inside maxDuration even with Phase B's video download+analyze
 // step. The client polls this in a loop; after() also fires one more self-call
@@ -17,7 +39,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ run
   if (!run) return NextResponse.json({ error: "scan run not found" }, { status: 404 });
 
   if (run.status === "cancelled") {
-    return NextResponse.json({ done: run.done, failed: run.failed, total: run.total, finished: true, cancelled: true });
+    const { done, failed } = await getRunProgress(runId);
+    return NextResponse.json({ done, failed, total: run.total, finished: true, cancelled: true });
   }
   if (run.phase !== "analyzing") {
     return NextResponse.json({ done: run.done, failed: run.failed, total: run.total, finished: false });
@@ -38,11 +61,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ run
       .select("id", { count: "exact", head: true })
       .eq("run_id", runId)
       .eq("status", "queued");
+    const { done, failed, costUsd } = await getRunProgress(runId);
     if (!remaining) {
-      await supabaseAdmin.from("scan_runs").update({ status: "done", phase: "done", finished_at: new Date().toISOString() }).eq("id", runId);
-      return NextResponse.json({ done: run.done, failed: run.failed, total: run.total, finished: true });
+      await supabaseAdmin
+        .from("scan_runs")
+        .update({ status: "done", phase: "done", done, failed, cost_usd: costUsd, finished_at: new Date().toISOString() })
+        .eq("id", runId);
+      return NextResponse.json({ done, failed, total: run.total, finished: true });
     }
-    return NextResponse.json({ done: run.done, failed: run.failed, total: run.total, finished: false });
+    return NextResponse.json({ done, failed, total: run.total, finished: false });
   }
 
   // Best-effort claim: only flip queued -> running if it's still queued, so the
@@ -56,12 +83,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ run
     .maybeSingle();
 
   if (!claimed) {
-    return NextResponse.json({ done: run.done, failed: run.failed, total: run.total, finished: false });
+    const { done, failed } = await getRunProgress(runId);
+    return NextResponse.json({ done, failed, total: run.total, finished: false });
   }
 
   const item = claimed.payload as ApifyReelItem;
-  let done = run.done;
-  let failed = run.failed;
 
   try {
     const result = await analyzeAndStoreReel({
@@ -81,7 +107,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ run
       videoUrl: item.videoUrl ?? null,
       raw: item,
     });
-    done += 1;
     await supabaseAdmin
       .from("scan_items")
       .update({
@@ -90,12 +115,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ run
         human_message: `分析了 @${claimed.owner_username} 的一条 Reel，打了 ${result.analysis.relevance_score} 分`,
       })
       .eq("id", claimed.id);
-    await supabaseAdmin
-      .from("scan_runs")
-      .update({ done, cost_usd: Number(run.cost_usd ?? 0) + result.costUsd })
-      .eq("id", runId);
   } catch (err) {
-    failed += 1;
     await supabaseAdmin
       .from("scan_items")
       .update({
@@ -104,13 +124,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ run
         human_message: `@${claimed.owner_username} 的这条分析失败：${(err as Error).message}`,
       })
       .eq("id", claimed.id);
-    await supabaseAdmin.from("scan_runs").update({ failed }).eq("id", runId);
   }
 
+  const { done, failed, costUsd } = await getRunProgress(runId);
   const finished = done + failed >= run.total;
   if (finished) {
-    await supabaseAdmin.from("scan_runs").update({ status: "done", phase: "done", finished_at: new Date().toISOString() }).eq("id", runId);
+    await supabaseAdmin
+      .from("scan_runs")
+      .update({ status: "done", phase: "done", done, failed, cost_usd: costUsd, finished_at: new Date().toISOString() })
+      .eq("id", runId);
   } else {
+    await supabaseAdmin.from("scan_runs").update({ done, failed, cost_usd: costUsd }).eq("id", runId);
     after(async () => {
       try {
         await fetch(new URL(`/api/reel-radar/scan/${runId}/continue`, req.nextUrl.origin), { method: "POST" });

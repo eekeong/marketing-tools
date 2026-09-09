@@ -5,6 +5,14 @@ import { ReelSource } from "@/lib/reelRadarTypes";
 
 export const maxDuration = 60;
 
+// "我的账号" isn't a discovery feed you want capped — it's your own finite history,
+// and you genuinely want it all covered eventually. Decoupled from reels_per_account
+// (which stays the per-competitor/discover cap) so raising one doesn't also make
+// every competitor scan pull hundreds of posts. Already-collected reels are skipped
+// by the shortcode dedupe in status/route.ts, so re-scanning after the first full
+// backfill only costs for genuinely new videos.
+const MY_ACCOUNT_RESULTS_LIMIT = 500;
+
 // Starts a scan and returns immediately with a runId — the actual scrape (which can
 // take much longer than a single request should block on) runs on Apify's side, and
 // analysis happens incrementally via /scan/[runId]/continue. See status/route.ts for
@@ -49,7 +57,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "还没有设置你自己的 IG 账号，先在设置里填写。" }, { status: 400 });
     }
     scannedUsernames = [settings.my_ig_username];
-    input = buildRadarInput(scannedUsernames, resultsLimit);
+    input = buildRadarInput(scannedUsernames, MY_ACCOUNT_RESULTS_LIMIT);
   }
 
   let handle;

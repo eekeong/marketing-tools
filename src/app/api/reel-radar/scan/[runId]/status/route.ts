@@ -4,6 +4,12 @@ import { getActorRunStatus, getDatasetItems, ApifyReelItem } from "@/lib/apify";
 
 export const maxDuration = 60;
 
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
 // Polled by the client while a scan is running. While phase is "collecting" this
 // checks in on the async Apify run; once it succeeds, this is also where the
 // dedupe/blocklist/empty-caption pre-checks run and scan_items get queued for
@@ -58,26 +64,50 @@ export async function GET(_req: Request, { params }: { params: Promise<{ runId: 
     }
 
     const items = await getDatasetItems<ApifyReelItem>(apifyStatus.datasetId);
+
+    // Bulk pre-checks instead of 2-3 sequential round-trips per item — a "mine"
+    // backfill can return hundreds of items (an account's full history), and
+    // per-item queries at that scale risk this request running past maxDuration
+    // and leaving the run stuck in "collecting" forever, same failure mode this
+    // whole resumable-scan design was built to fix.
+    const errorItems = items.filter((i) => i.error || !i.shortCode);
+    const validItems = items.filter((i) => !i.error && i.shortCode) as (ApifyReelItem & { shortCode: string })[];
+    const allShortcodes = validItems.map((i) => i.shortCode);
+
+    const existingShortcodes = new Set<string>();
+    for (const batch of chunk(allShortcodes, 200)) {
+      if (batch.length === 0) continue;
+      const { data } = await supabaseAdmin.from("reels").select("shortcode").in("shortcode", batch);
+      for (const r of data ?? []) existingShortcodes.add(r.shortcode);
+    }
+
+    const blockedShortcodes = new Set<string>();
+    for (const batch of chunk(allShortcodes, 200)) {
+      if (batch.length === 0) continue;
+      const { data } = await supabaseAdmin.from("blocklist").select("shortcode").in("shortcode", batch);
+      for (const r of data ?? []) blockedShortcodes.add(r.shortcode);
+    }
+
+    const rowsToInsert: Record<string, unknown>[] = [];
     let queued = 0;
 
-    for (const item of items) {
-      if (item.error || !item.shortCode) {
-        await supabaseAdmin.from("scan_items").insert({
-          run_id: runId,
-          owner_username: item.username ?? item.ownerUsername ?? null,
-          stage: "fetch",
-          status: "failed",
-          error_message: item.errorDescription ?? item.error ?? "no data returned",
-          human_message: `@${item.username ?? item.ownerUsername ?? "?"} 抓取失败：${item.errorDescription ?? item.error ?? "没有返回数据"}`,
-        });
-        continue;
-      }
+    for (const item of errorItems) {
+      rowsToInsert.push({
+        run_id: runId,
+        owner_username: item.username ?? item.ownerUsername ?? null,
+        stage: "fetch",
+        status: "failed",
+        error_message: item.errorDescription ?? item.error ?? "no data returned",
+        human_message: `@${item.username ?? item.ownerUsername ?? "?"} 抓取失败：${item.errorDescription ?? item.error ?? "没有返回数据"}`,
+      });
+    }
+
+    for (const item of validItems) {
       const shortcode = item.shortCode;
       const ownerUsername = item.ownerUsername ?? "unknown";
 
-      const { data: existingReel } = await supabaseAdmin.from("reels").select("id").eq("shortcode", shortcode).maybeSingle();
-      if (existingReel) {
-        await supabaseAdmin.from("scan_items").insert({
+      if (existingShortcodes.has(shortcode)) {
+        rowsToInsert.push({
           run_id: runId,
           shortcode,
           owner_username: ownerUsername,
@@ -87,13 +117,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ runId: 
         });
         continue;
       }
-
-      const { data: blocked } = await supabaseAdmin.from("blocklist").select("shortcode").eq("shortcode", shortcode).maybeSingle();
-      if (blocked) continue;
+      if (blockedShortcodes.has(shortcode)) continue;
 
       const caption = (item.caption ?? "").trim();
       if (!caption) {
-        await supabaseAdmin.from("scan_items").insert({
+        rowsToInsert.push({
           run_id: runId,
           shortcode,
           owner_username: ownerUsername,
@@ -105,7 +133,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ runId: 
         continue;
       }
 
-      await supabaseAdmin.from("scan_items").insert({
+      rowsToInsert.push({
         run_id: runId,
         shortcode,
         owner_username: ownerUsername,
@@ -134,11 +162,17 @@ export async function GET(_req: Request, { params }: { params: Promise<{ runId: 
         .eq("stage", "analyze")
         .eq("status", "failed")
         .not("payload", "is", null);
-      for (const fi of failedItems ?? []) {
-        if (!fi.shortcode) continue;
-        const { data: existingReel } = await supabaseAdmin.from("reels").select("id").eq("shortcode", fi.shortcode).maybeSingle();
-        if (existingReel) continue;
-        await supabaseAdmin.from("scan_items").insert({
+      const candidates = (failedItems ?? []).filter((fi) => fi.shortcode);
+      const retryShortcodes = candidates.map((fi) => fi.shortcode as string);
+      const alreadyExists = new Set<string>();
+      for (const batch of chunk(retryShortcodes, 200)) {
+        if (batch.length === 0) continue;
+        const { data } = await supabaseAdmin.from("reels").select("shortcode").in("shortcode", batch);
+        for (const r of data ?? []) alreadyExists.add(r.shortcode);
+      }
+      for (const fi of candidates) {
+        if (alreadyExists.has(fi.shortcode as string)) continue;
+        rowsToInsert.push({
           run_id: runId,
           shortcode: fi.shortcode,
           owner_username: fi.owner_username,
@@ -148,6 +182,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ runId: 
         });
         queued += 1;
       }
+    }
+
+    for (const batch of chunk(rowsToInsert, 200)) {
+      if (batch.length === 0) continue;
+      await supabaseAdmin.from("scan_items").insert(batch);
     }
 
     if (queued === 0) {
