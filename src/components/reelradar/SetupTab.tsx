@@ -23,7 +23,7 @@ interface Settings {
 }
 
 export default function SetupTab() {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const [competitors, setCompetitors] = useState<Competitor[]>([]);
   const [keywords, setKeywords] = useState<Keyword[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -34,6 +34,8 @@ export default function SetupTab() {
   const [newKeyword, setNewKeyword] = useState("");
   const [apifyUsage, setApifyUsage] = useState<{ usedUsd: number; limitUsd: number; cycleEndsAt: string } | null>(null);
   const [apifyUsageError, setApifyUsageError] = useState(false);
+  const [geminiUsage, setGeminiUsage] = useState<{ costUsd: number } | null>(null);
+  const [geminiUsageError, setGeminiUsageError] = useState(false);
 
   const load = async () => {
     const [compRes, kwRes, settingsRes] = await Promise.all([
@@ -57,6 +59,13 @@ export default function SetupTab() {
         else setApifyUsage(json);
       })
       .catch(() => setApifyUsageError(true));
+    fetch("/api/reel-radar/gemini-usage")
+      .then((r) => r.json())
+      .then((json) => {
+        if (json.error) setGeminiUsageError(true);
+        else setGeminiUsage(json);
+      })
+      .catch(() => setGeminiUsageError(true));
   }, []);
 
   const addCompetitor = async () => {
@@ -128,35 +137,58 @@ export default function SetupTab() {
         <p className="text-sm text-muted">{t("setup.subtitle")}</p>
       </div>
 
-      <div>
-        <p className="text-sm font-semibold mb-1">{t("setup.apifyUsageTitle")}</p>
-        <p className="text-xs text-muted mb-3">{t("setup.apifyUsageDesc")}</p>
-        <div className="rounded-2xl border border-border bg-surface p-4">
-          {apifyUsageError ? (
-            <p className="text-sm text-red-500">{t("setup.apifyUsageError")}</p>
-          ) : !apifyUsage ? (
-            <p className="text-sm text-muted">{t("reelradar.loading")}</p>
-          ) : (
-            <>
-              <div className="flex items-baseline justify-between mb-2">
-                <span className="text-2xl font-semibold">
-                  ${Math.max(0, apifyUsage.limitUsd - apifyUsage.usedUsd).toFixed(2)}
-                </span>
-                <span className="text-xs text-muted">
-                  {t("setup.apifyUsageRemaining")} / ${apifyUsage.limitUsd.toFixed(0)}
-                </span>
-              </div>
-              <div className="h-2 rounded-full bg-background overflow-hidden mb-2">
-                <div
-                  className="h-full brand-gradient rounded-full transition-all"
-                  style={{ width: `${Math.min(100, (apifyUsage.usedUsd / apifyUsage.limitUsd) * 100)}%` }}
-                />
-              </div>
-              <p className="text-[11px] text-muted">
-                {t("setup.apifyUsageResetsOn")} {apifyUsage.cycleEndsAt.slice(0, 10)}
-              </p>
-            </>
-          )}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+        <div>
+          <p className="text-sm font-semibold mb-1">{t("setup.apifyUsageTitle")}</p>
+          <p className="text-xs text-muted mb-3">{t("setup.apifyUsageDesc")}</p>
+          <div className="rounded-2xl border border-border bg-surface p-4">
+            {apifyUsageError ? (
+              <p className="text-sm text-red-500">{t("setup.apifyUsageError")}</p>
+            ) : !apifyUsage ? (
+              <p className="text-sm text-muted">{t("reelradar.loading")}</p>
+            ) : (
+              <>
+                <div className="flex items-baseline justify-between mb-2">
+                  <span className="text-2xl font-semibold">
+                    ${Math.max(0, apifyUsage.limitUsd - apifyUsage.usedUsd).toFixed(2)}
+                  </span>
+                  <span className="text-xs text-muted">
+                    {t("setup.apifyUsageRemaining")} / ${apifyUsage.limitUsd.toFixed(0)}
+                  </span>
+                </div>
+                <div className="h-2 rounded-full bg-background overflow-hidden mb-2">
+                  <div
+                    className="h-full brand-gradient rounded-full transition-all"
+                    style={{ width: `${Math.min(100, (apifyUsage.usedUsd / apifyUsage.limitUsd) * 100)}%` }}
+                  />
+                </div>
+                <p className="text-[11px] text-muted">
+                  {t("setup.apifyUsageResetsOn")} {apifyUsage.cycleEndsAt.slice(0, 10)}
+                </p>
+              </>
+            )}
+          </div>
+        </div>
+
+        <div>
+          <p className="text-sm font-semibold mb-1">{lang === "zh" ? "Gemini 用量（预估）" : "Gemini Usage (estimated)"}</p>
+          <p className="text-xs text-muted mb-3">
+            {lang === "zh"
+              ? "Google 没有开放用 API key 查真实账单，这是我们自己按 token 数估算的，会跟官方账单有点误差。"
+              : "Google doesn't expose real billing via API key — this is our own token-based estimate and may drift from the official bill."}
+          </p>
+          <div className="rounded-2xl border border-border bg-surface p-4">
+            {geminiUsageError ? (
+              <p className="text-sm text-red-500">{lang === "zh" ? "读取用量失败" : "Couldn't load usage"}</p>
+            ) : !geminiUsage ? (
+              <p className="text-sm text-muted">{t("reelradar.loading")}</p>
+            ) : (
+              <>
+                <span className="text-2xl font-semibold">${geminiUsage.costUsd.toFixed(4)}</span>
+                <p className="text-[11px] text-muted mt-2">{lang === "zh" ? "本月至今（估算）" : "This month so far (estimated)"}</p>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
